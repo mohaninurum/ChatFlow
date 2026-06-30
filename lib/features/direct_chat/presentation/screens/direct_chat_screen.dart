@@ -12,18 +12,16 @@ class DirectChatScreen extends ConsumerStatefulWidget {
 
 class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
   final _phoneController = TextEditingController();
-  final _messageController = TextEditingController();
   String _countryCode = '+91'; // Default
 
   Future<void> _openWhatsApp() async {
     final phone = _phoneController.text.trim();
-    final message = _messageController.text.trim();
     if (phone.isEmpty) return;
 
     final cleanPhone = phone.replaceAll(RegExp(r'\D'), '');
     final cleanCode = _countryCode.replaceAll('+', '');
     
-    final url = Uri.parse('https://wa.me/$cleanCode$cleanPhone?text=${Uri.encodeComponent(message)}');
+    final url = Uri.parse('https://wa.me/$cleanCode$cleanPhone');
     
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
@@ -84,18 +82,6 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
                   ),
                 ),
               ],
-            ),
-            SizedBox(height: 16.h),
-            TextField(
-              controller: _messageController,
-              decoration: InputDecoration(
-                labelText: 'Message (Optional)',
-                hintText: 'Type something...',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(16.r)),
-                filled: true,
-                alignLabelWithHint: true,
-              ),
-              maxLines: 4,
             ),
             SizedBox(height: 32.h),
             ElevatedButton(

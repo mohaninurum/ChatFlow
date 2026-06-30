@@ -1,11 +1,11 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class FileManagerScreen extends ConsumerWidget {
   const FileManagerScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final categories = [
       {'name': 'Images', 'icon': Icons.image, 'count': '243 files'},
       {'name': 'Videos', 'icon': Icons.video_file, 'count': '45 files'},

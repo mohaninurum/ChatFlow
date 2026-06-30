@@ -134,9 +134,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         'color': Colors.green,
       },
       {
-        'title': 'Notification History',
+        'title': 'Recover Deleted Msgs',
         'subtitle': 'Catch deleted messages',
-        'icon': Icons.history,
+        'icon': Icons.delete_sweep,
         'route': 'notificationHistory',
         'color': Colors.purple,
       },

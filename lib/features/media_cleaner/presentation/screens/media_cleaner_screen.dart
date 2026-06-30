@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class MediaCleanerScreen extends ConsumerWidget {
@@ -39,7 +39,6 @@ class MediaCleanerScreen extends ConsumerWidget {
               width: double.infinity,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(padding: const EdgeInsets.all(16)),
-                onSelected: null,
                 onPressed: () {
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cleaning up 1.4 GB...')));
                 },
