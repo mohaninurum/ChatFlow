@@ -1,0 +1,51 @@
+name: Chatflow Build
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches:
+      - development
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout code
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2️⃣ Setup Flutter
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.9'
+          channel: 'stable'
+
+      # 3️⃣ Install dependencies
+      - name: Install dependencies
+        run: flutter pub get
+
+      # 4️⃣ Generate code using build_runner
+      - name: Run build_runner
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      # 5️⃣ Build release APK
+      - name: Build APK
+        run: flutter build apk --release
+
+      # 6️⃣ Create GitHub Release
+      - name: Create Release & Upload APK
+        uses: ncipollo/release-action@v1
+        with:
+         tag: v${{ github.run_number }}
+         name: Chatflow Release v${{ github.run_number }}
+         body: "Automated APK build from GitHub Actions for Chatflow"
+         allowUpdates: true
+         artifacts: build/app/outputs/flutter-apk/app-release.apk
+         token: ${{ secrets.GITHUB_TOKEN }}
+
+
