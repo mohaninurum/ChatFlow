@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Environment
 import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
+import android.media.MediaMetadataRetriever
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -103,6 +104,207 @@ class MainActivity : FlutterActivity() {
                             result.success(true)
                         } catch (e: Exception) {
                             result.error("OPEN_ERROR", e.message, null)
+                        }
+                    } else {
+                        result.error("INVALID_PATH", "File path is null", null)
+                    }
+                }
+                "getVideoThumbnail" -> {
+                    val filePath = call.argument<String>("path")
+                    if (filePath != null) {
+                        Thread {
+                            try {
+                                val file = File(filePath)
+                                if (file.exists()) {
+                                    val retriever = MediaMetadataRetriever()
+                                    retriever.setDataSource(filePath)
+                                    val bitmap = retriever.getFrameAtTime(1000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                                        ?: retriever.frameAtTime
+                                    retriever.release()
+                                    if (bitmap != null) {
+                                        val scaled = if (bitmap.width > 360) {
+                                            val ratio = 360f / bitmap.width
+                                            android.graphics.Bitmap.createScaledBitmap(bitmap, 360, (bitmap.height * ratio).toInt(), true)
+                                        } else {
+                                            bitmap
+                                        }
+                                        val stream = java.io.ByteArrayOutputStream()
+                                        scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, stream)
+                                        val bytes = stream.toByteArray()
+                                        runOnUiThread {
+                                            result.success(bytes)
+                                        }
+                                        return@Thread
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                            runOnUiThread {
+                                result.success(null)
+                            }
+                        }.start()
+                    } else {
+                        result.error("INVALID_PATH", "File path is null", null)
+                    }
+                }
+                "playVideoFullscreen" -> {
+                    val filePath = call.argument<String>("path")
+                    if (filePath != null) {
+                        try {
+                            val videoFile = File(filePath)
+                            val dialog = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+                            dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+                            dialog.window?.setFlags(
+                                android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                                android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN
+                            )
+                            dialog.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+                            val root = android.widget.FrameLayout(this).apply {
+                                setBackgroundColor(android.graphics.Color.BLACK)
+                                layoutParams = android.widget.FrameLayout.LayoutParams(
+                                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                                )
+                            }
+
+                            val videoView = android.widget.VideoView(this).apply {
+                                layoutParams = android.widget.FrameLayout.LayoutParams(
+                                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                                    android.view.Gravity.CENTER
+                                )
+                            }
+                            root.addView(videoView)
+
+                            val mediaController = android.widget.MediaController(this)
+                            mediaController.setAnchorView(videoView)
+                            videoView.setMediaController(mediaController)
+
+                            val topBar = android.widget.RelativeLayout(this).apply {
+                                setBackgroundColor(android.graphics.Color.parseColor("#99000000"))
+                                val dp12 = (12 * resources.displayMetrics.density).toInt()
+                                val dp36 = (36 * resources.displayMetrics.density).toInt()
+                                setPadding(dp12, dp36, dp12, dp12)
+                                layoutParams = android.widget.FrameLayout.LayoutParams(
+                                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                                    android.view.Gravity.TOP
+                                )
+                            }
+
+                            val closeBtn = android.widget.ImageView(this).apply {
+                                id = android.view.View.generateViewId()
+                                val dp40 = (40 * resources.displayMetrics.density).toInt()
+                                val dp8 = (8 * resources.displayMetrics.density).toInt()
+                                layoutParams = android.widget.RelativeLayout.LayoutParams(dp40, dp40).apply {
+                                    addRule(android.widget.RelativeLayout.ALIGN_PARENT_START)
+                                    addRule(android.widget.RelativeLayout.CENTER_VERTICAL)
+                                }
+                                setPadding(dp8, dp8, dp8, dp8)
+                                setImageResource(android.R.drawable.ic_menu_revert)
+                                setColorFilter(android.graphics.Color.WHITE)
+                                setOnClickListener { dialog.dismiss() }
+                            }
+                            topBar.addView(closeBtn)
+
+                            val titleView = android.widget.TextView(this).apply {
+                                val dp8 = (8 * resources.displayMetrics.density).toInt()
+                                layoutParams = android.widget.RelativeLayout.LayoutParams(
+                                    android.widget.RelativeLayout.LayoutParams.WRAP_CONTENT,
+                                    android.widget.RelativeLayout.LayoutParams.WRAP_CONTENT
+                                ).apply {
+                                    addRule(android.widget.RelativeLayout.RIGHT_OF, closeBtn.id)
+                                    addRule(android.widget.RelativeLayout.CENTER_VERTICAL)
+                                    setMargins(dp8, 0, dp8, 0)
+                                }
+                                text = videoFile.name
+                                setTextColor(android.graphics.Color.WHITE)
+                                textSize = 15f
+                                setTypeface(null, android.graphics.Typeface.BOLD)
+                                maxLines = 1
+                                ellipsize = android.text.TextUtils.TruncateAt.END
+                            }
+                            topBar.addView(titleView)
+
+                            val actionsLayout = android.widget.LinearLayout(this).apply {
+                                orientation = android.widget.LinearLayout.HORIZONTAL
+                                layoutParams = android.widget.RelativeLayout.LayoutParams(
+                                    android.widget.RelativeLayout.LayoutParams.WRAP_CONTENT,
+                                    android.widget.RelativeLayout.LayoutParams.WRAP_CONTENT
+                                ).apply {
+                                    addRule(android.widget.RelativeLayout.ALIGN_PARENT_END)
+                                    addRule(android.widget.RelativeLayout.CENTER_VERTICAL)
+                                }
+                            }
+
+                            val saveBtn = android.widget.ImageView(this).apply {
+                                val dp40 = (40 * resources.displayMetrics.density).toInt()
+                                val dp8 = (8 * resources.displayMetrics.density).toInt()
+                                layoutParams = android.widget.LinearLayout.LayoutParams(dp40, dp40).apply {
+                                    setMargins(0, 0, dp8, 0)
+                                }
+                                setPadding(dp8, dp8, dp8, dp8)
+                                setImageResource(android.R.drawable.ic_menu_save)
+                                setColorFilter(android.graphics.Color.WHITE)
+                                setOnClickListener {
+                                    try {
+                                        val picturesDir = File("/storage/emulated/0/Pictures/Chatflow")
+                                        if (!picturesDir.exists()) picturesDir.mkdirs()
+                                        val target = File(picturesDir, videoFile.name)
+                                        videoFile.copyTo(target, overwrite = true)
+                                        android.widget.Toast.makeText(this@MainActivity, "Saved to Pictures/Chatflow!", android.widget.Toast.LENGTH_SHORT).show()
+                                    } catch (e: Exception) {
+                                        android.widget.Toast.makeText(this@MainActivity, "Save failed: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                            actionsLayout.addView(saveBtn)
+
+                            val shareBtn = android.widget.ImageView(this).apply {
+                                val dp40 = (40 * resources.displayMetrics.density).toInt()
+                                val dp8 = (8 * resources.displayMetrics.density).toInt()
+                                layoutParams = android.widget.LinearLayout.LayoutParams(dp40, dp40)
+                                setPadding(dp8, dp8, dp8, dp8)
+                                setImageResource(android.R.drawable.ic_menu_share)
+                                setColorFilter(android.graphics.Color.WHITE)
+                                setOnClickListener {
+                                    try {
+                                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                                            this@MainActivity,
+                                            "${packageName}.fileprovider",
+                                            videoFile
+                                        )
+                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "video/mp4"
+                                            putExtra(Intent.EXTRA_STREAM, uri)
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        startActivity(Intent.createChooser(shareIntent, "Share Status Video"))
+                                    } catch (e: Exception) {
+                                        android.widget.Toast.makeText(this@MainActivity, "Share failed: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                            actionsLayout.addView(shareBtn)
+                            topBar.addView(actionsLayout)
+
+                            root.addView(topBar)
+
+                            dialog.setContentView(root)
+
+                            videoView.setVideoPath(filePath)
+                            videoView.setOnPreparedListener { mp ->
+                                mp.isLooping = true
+                                videoView.start()
+                            }
+                            dialog.setOnDismissListener {
+                                videoView.stopPlayback()
+                            }
+
+                            dialog.show()
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("PLAY_ERROR", e.message, null)
                         }
                     } else {
                         result.error("INVALID_PATH", "File path is null", null)

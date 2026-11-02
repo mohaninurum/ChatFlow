@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -24,6 +25,7 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
   List<File> _photos = [];
   List<File> _videos = [];
   List<File> _savedDownloads = [];
+  final Map<String, Uint8List> _videoThumbnails = {};
   bool _isLoading = true;
   bool _permissionDenied = false;
 
@@ -236,6 +238,11 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
         // If files are loaded, permissions are working!
         _permissionDenied = (photos.isEmpty && videos.isEmpty && !isGranted);
       });
+
+      // Prefetch thumbnails for videos in background
+      for (var v in videos) {
+        _fetchThumbnail(v.path);
+      }
     }
   }
 
@@ -390,18 +397,78 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     }
   }
 
+  Future<void> _fetchThumbnail(String videoPath) async {
+    if (_videoThumbnails.containsKey(videoPath)) return;
+    try {
+      final Uint8List? bytes = await _channel.invokeMethod<Uint8List>('getVideoThumbnail', {
+        'path': videoPath,
+      });
+      if (bytes != null && mounted) {
+        setState(() {
+          _videoThumbnails[videoPath] = bytes;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Widget _buildVideoThumbnailWidget(File file) {
+    final bytes = _videoThumbnails[file.path];
+    if (bytes == null) {
+      _fetchThumbnail(file.path);
+      return Container(
+        color: Colors.black87,
+        child: const Center(
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF25D366)),
+          ),
+        ),
+      );
+    }
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Container(
+            color: Colors.black87,
+            child: const Icon(Icons.videocam_outlined, color: Colors.white54),
+          ),
+        ),
+        Container(
+          color: Colors.black26,
+        ),
+        Center(
+          child: CircleAvatar(
+            radius: 22.r,
+            backgroundColor: Colors.black54,
+            child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 28),
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _openFile(File file, bool isVideo) async {
     if (isVideo) {
       try {
-        await _channel.invokeMethod('openFile', {
+        await _channel.invokeMethod('playVideoFullscreen', {
           'path': file.path,
-          'mimeType': 'video/mp4',
         });
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error playing video: $e')),
-          );
+      } catch (_) {
+        try {
+          await _channel.invokeMethod('openFile', {
+            'path': file.path,
+            'mimeType': 'video/mp4',
+          });
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Error playing video: $e')),
+            );
+          }
         }
       }
     } else {
@@ -786,16 +853,7 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
                   }
                 },
                 child: fileIsVideo
-                    ? Container(
-                        color: Colors.black87,
-                        child: Center(
-                          child: Icon(
-                            Icons.play_circle_fill,
-                            color: Colors.white.withOpacity(0.9),
-                            size: 56.sp,
-                          ),
-                        ),
-                      )
+                    ? _buildVideoThumbnailWidget(file)
                     : Image.file(
                         file,
                         fit: BoxFit.cover,
