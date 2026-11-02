@@ -24,6 +24,7 @@ class _NotificationHistoryScreenState extends ConsumerState<NotificationHistoryS
 
   Future<void> _checkPermissionAndListen() async {
     final bool status = await NotificationListenerService.isPermissionGranted();
+    if (!mounted) return;
     setState(() => _hasPermission = status);
 
     if (status) {
@@ -33,11 +34,13 @@ class _NotificationHistoryScreenState extends ConsumerState<NotificationHistoryS
 
   Future<void> _requestPermission() async {
     await NotificationListenerService.requestPermission();
+    if (!mounted) return;
     _checkPermissionAndListen();
   }
 
   void _startListening() {
     _subscription = NotificationListenerService.notificationsStream.listen((event) {
+      if (!mounted) return;
       // Only listen to WhatsApp and WhatsApp Business
       if (event.packageName == 'com.whatsapp' || event.packageName == 'com.whatsapp.w4b') {
         // Exclude system/ongoing notifications
