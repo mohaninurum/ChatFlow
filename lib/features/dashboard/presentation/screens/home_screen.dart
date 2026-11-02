@@ -19,16 +19,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Future<void> _requestPermissions() async {
-    await [
-      Permission.storage,
-      Permission.photos,
-      Permission.videos,
-      Permission.notification,
-    ].request();
-    // Manage external storage may be required for Android 11+
-    if (await Permission.manageExternalStorage.isDenied) {
-      await Permission.manageExternalStorage.request();
-    }
+    await [Permission.storage, Permission.photos, Permission.videos].request();
   }
 
   @override
@@ -40,10 +31,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       body: CustomScrollView(
         slivers: [
           SliverAppBar.large(
-            title: const Text('Chatflow', style: TextStyle(fontWeight: FontWeight.bold)),
+            title: const Text(
+              'Chatflow',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             actions: [
               IconButton(
-                icon: const Icon(Icons.settings_outlined), // Fallback icon as lucide is not installed
+                icon: const Icon(
+                  Icons.settings_outlined,
+                ), // Fallback icon as lucide is not installed
                 onPressed: () => context.pushNamed('settings'),
               ),
             ],
@@ -54,7 +50,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               delegate: SliverChildListDelegate([
                 _buildWelcomeCard(colorScheme),
                 SizedBox(height: 24.h),
-                Text('Quick Actions', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                Text(
+                  'Quick Actions',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 SizedBox(height: 16.h),
                 _buildFeaturesGrid(context),
               ]),
@@ -108,7 +109,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               children: [
                 const Icon(Icons.flash_on, color: Colors.white, size: 16),
                 SizedBox(width: 4.w),
-                const Text('All tools active', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                const Text(
+                  'All tools active',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ],
             ),
           ),
@@ -141,53 +148,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         'color': Colors.purple,
       },
       {
-        'title': 'Media Cleaner',
-        'subtitle': 'Clean junk & duplicates',
-        'icon': Icons.cleaning_services_outlined,
-        'route': 'mediaCleaner',
-        'color': Colors.orange,
-      },
-      {
-        'title': 'QR Tools',
-        'subtitle': 'Scan & Generate QR',
-        'icon': Icons.qr_code_scanner,
-        'route': 'qrTools',
-        'color': Colors.teal,
-      },
-      {
-        'title': 'Text Tools',
-        'subtitle': 'Stylish text & repeater',
-        'icon': Icons.text_fields,
-        'route': 'textTools',
-        'color': Colors.indigo,
-      },
-      {
-        'title': 'File Manager',
-        'subtitle': 'Manage media files',
-        'icon': Icons.folder_open_outlined,
-        'route': 'fileManager',
-        'color': Colors.amber,
-      },
-      {
-        'title': 'Status Creator',
-        'subtitle': 'Create text & image status',
-        'icon': Icons.brush_outlined,
-        'route': 'statusCreator',
-        'color': Colors.pink,
-      },
-      {
         'title': 'Chat Utilities',
         'subtitle': 'Quick replies & reminders',
         'icon': Icons.handyman_outlined,
         'route': 'chatUtilities',
         'color': Colors.cyan,
-      },
-      {
-        'title': 'Backup',
-        'subtitle': 'Backup & Restore settings',
-        'icon': Icons.backup_outlined,
-        'route': 'backup',
-        'color': Colors.brown,
       },
       {
         'title': 'Settings',
@@ -248,7 +213,7 @@ class _FeatureCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
+
     return Material(
       color: theme.cardTheme.color,
       borderRadius: BorderRadius.circular(24.r),
