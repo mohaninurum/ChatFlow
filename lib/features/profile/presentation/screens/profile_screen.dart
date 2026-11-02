@@ -47,7 +47,7 @@ class ProfileScreen extends ConsumerWidget {
                 SizedBox(width: 10.w),
                 _buildStatCard(theme, '$templateCount', 'Templates'),
                 SizedBox(width: 10.w),
-                _buildStatCard(theme, '$deletedCount', 'Msgs Logged'),
+                _buildStatCard(theme, '${HiveStorageService.history.length}', 'Sent Logs'),
               ],
             ),
           ),

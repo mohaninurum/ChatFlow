@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:notification_listener_service/notification_listener_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/storage/hive_storage_service.dart';
 
@@ -12,7 +11,6 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  bool _notificationGranted = false;
   bool _storageGranted = false;
 
   @override
@@ -22,11 +20,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _checkPermissions() async {
-    final notif = await NotificationListenerService.isPermissionGranted();
     final storage = await Permission.storage.isGranted || await Permission.photos.isGranted;
     if (mounted) {
       setState(() {
-        _notificationGranted = notif;
         _storageGranted = storage;
       });
     }
@@ -43,19 +39,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Text('Permissions', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-          ),
-          ListTile(
-            leading: Icon(
-              _notificationGranted ? Icons.notifications_active : Icons.notifications_off_outlined,
-              color: _notificationGranted ? Colors.green : Colors.red,
-            ),
-            title: const Text('Notification Access'),
-            subtitle: Text(_notificationGranted ? 'Enabled (Catching deleted msgs)' : 'Disabled - Tap to enable'),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-            onTap: () async {
-              await NotificationListenerService.requestPermission();
-              await _checkPermissions();
-            },
           ),
           ListTile(
             leading: Icon(

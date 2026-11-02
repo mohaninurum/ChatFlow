@@ -5,7 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../features/dashboard/presentation/screens/home_screen.dart';
 import '../../features/direct_chat/presentation/screens/direct_chat_screen.dart';
 import '../../features/status_saver/presentation/screens/status_saver_screen.dart';
-import '../../features/notification_history/presentation/screens/notification_history_screen.dart';
+import '../../features/message_hub/presentation/screens/message_hub_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
 import '../../features/chat_utilities/presentation/screens/chat_utilities_screen.dart';
 import '../../features/profile/presentation/screens/profile_screen.dart';
@@ -30,9 +30,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const StatusSaverScreen(),
       ),
       GoRoute(
-        path: '/notification-history',
-        name: 'notificationHistory',
-        builder: (context, state) => const NotificationHistoryScreen(),
+        path: '/message-hub',
+        name: 'messageHub',
+        builder: (context, state) => const MessageHubScreen(),
       ),
       GoRoute(
         path: '/chat-utilities',
