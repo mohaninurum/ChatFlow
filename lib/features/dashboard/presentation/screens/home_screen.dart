@@ -2,62 +2,126 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:go_router/go_router.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import '../../../../core/storage/hive_storage_service.dart';
 
-class HomeScreen extends ConsumerStatefulWidget {
+class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
-  @override
-  ConsumerState<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends ConsumerState<HomeScreen> {
-  @override
-  void initState() {
-    super.initState();
-    _requestPermissions();
-  }
-
-  Future<void> _requestPermissions() async {
-    await [Permission.storage, Permission.photos, Permission.videos].request();
+  String _getGreeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Good morning 👋';
+    if (hour < 17) return 'Good afternoon ☀️';
+    return 'Good evening 🌙';
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
       body: CustomScrollView(
         slivers: [
+          // Premium Greeting Header AppBar
           SliverAppBar.large(
-            title: const Text(
-              'Chatflow',
-              style: TextStyle(fontWeight: FontWeight.bold),
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _getGreeting(),
+                  style: TextStyle(
+                    fontSize: 14.sp,
+                    fontWeight: FontWeight.normal,
+                    color: isDark ? Colors.grey[400] : Colors.grey[700],
+                  ),
+                ),
+                Text(
+                  'Chatflow Companion',
+                  style: TextStyle(
+                    fontSize: 22.sp,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+              ],
             ),
             actions: [
               IconButton(
-                icon: const Icon(
-                  Icons.settings_outlined,
-                ), // Fallback icon as lucide is not installed
+                icon: const Icon(Icons.analytics_outlined),
+                tooltip: 'Dashboard & Stats',
+                onPressed: () => context.pushNamed('profile'),
+              ),
+              IconButton(
+                icon: const Icon(Icons.settings_outlined),
+                tooltip: 'Settings',
                 onPressed: () => context.pushNamed('settings'),
               ),
+              SizedBox(width: 8.w),
             ],
           ),
+
           SliverPadding(
-            padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 16.h),
+            padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                _buildWelcomeCard(colorScheme),
+                // Welcome Hero Card
+                _buildHeroCard(context, colorScheme),
+                SizedBox(height: 20.h),
+
+                // Live Database Metrics Row
+                _buildMetricsRow(theme),
                 SizedBox(height: 24.h),
+
+                // Quick Actions Header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Quick Actions',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16.sp,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => context.pushNamed('chatUtilities'),
+                      child: const Text('View All'),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 8.h),
+                _buildQuickActionsRow(context),
+                SizedBox(height: 24.h),
+
+                // Core Tools Grid
                 Text(
-                  'Quick Actions',
+                  'Explore Companion Tools',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
+                    fontSize: 16.sp,
                   ),
                 ),
-                SizedBox(height: 16.h),
+                SizedBox(height: 12.h),
                 _buildFeaturesGrid(context),
+                SizedBox(height: 24.h),
+
+                // AI Spotlight Card
+                _buildAiSpotlightCard(context),
+                SizedBox(height: 24.h),
+
+                // Recent Activities Header & List
+                Text(
+                  'Recent Activity',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16.sp,
+                  ),
+                ),
+                SizedBox(height: 10.h),
+                _buildRecentActivitySection(),
+                SizedBox(height: 32.h),
               ]),
             ),
           ),
@@ -66,107 +130,215 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Widget _buildWelcomeCard(ColorScheme colorScheme) {
+  Widget _buildHeroCard(BuildContext context, ColorScheme colorScheme) {
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.all(24.w),
+      padding: EdgeInsets.all(22.w),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [colorScheme.primary, colorScheme.primary.withOpacity(0.8)],
+        gradient: const LinearGradient(
+          colors: [Color(0xFF25D366), Color(0xFF128C7E)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(24.r),
         boxShadow: [
           BoxShadow(
-            color: colorScheme.primary.withOpacity(0.3),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
+            color: const Color(0xFF25D366).withOpacity(0.3),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20.r),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.shield, color: Colors.white, size: 14),
+                    SizedBox(width: 4),
+                    Text(
+                      '100% Offline & Private',
+                      style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 16),
+                onPressed: () => context.pushNamed('directChat'),
+              ),
+            ],
+          ),
+          SizedBox(height: 14.h),
           Text(
-            'Enhance your\nMessaging Experience',
+            'Message Directly\nWithout Saving Contacts',
             style: TextStyle(
-              fontSize: 24.sp,
+              fontSize: 22.sp,
               fontWeight: FontWeight.bold,
               color: Colors.white,
-              height: 1.2,
+              height: 1.25,
             ),
           ),
-          SizedBox(height: 16.h),
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(20.r),
+          SizedBox(height: 14.h),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: const Color(0xFF128C7E),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14.r)),
+              elevation: 0,
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.flash_on, color: Colors.white, size: 16),
-                SizedBox(width: 4.w),
-                const Text(
-                  'All tools active',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
+            onPressed: () => context.pushNamed('directChat'),
+            icon: const Icon(Icons.chat, size: 16),
+            label: const Text('Start Direct Chat', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),
     );
   }
 
+  Widget _buildMetricsRow(ThemeData theme) {
+    return ValueListenableBuilder(
+      valueListenable: HiveStorageService.history.listenable(),
+      builder: (context, Box historyBox, _) {
+        final chats = historyBox.length;
+        final templates = HiveStorageService.templates.length;
+        final downloads = HiveStorageService.statusDownloads.length;
+
+        return Row(
+          children: [
+            _buildMetricPill(theme, '$chats', 'Chats Sent', Icons.chat_bubble_outline, Colors.blue),
+            SizedBox(width: 10.w),
+            _buildMetricPill(theme, '$templates', 'Templates', Icons.auto_stories, Colors.purple),
+            SizedBox(width: 10.w),
+            _buildMetricPill(theme, '$downloads', 'Saved Status', Icons.download_done, Colors.green),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildMetricPill(ThemeData theme, String val, String title, IconData icon, Color color) {
+    return Expanded(
+      child: Container(
+        padding: EdgeInsets.symmetric(vertical: 12.h, horizontal: 10.w),
+        decoration: BoxDecoration(
+          color: theme.cardTheme.color,
+          borderRadius: BorderRadius.circular(16.r),
+          border: Border.all(color: Colors.grey.withOpacity(0.15)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 20.sp),
+            SizedBox(height: 4.h),
+            Text(
+              val,
+              style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold, color: color),
+            ),
+            Text(
+              title,
+              style: TextStyle(fontSize: 10.sp, color: Colors.grey[600]),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickActionsRow(BuildContext context) {
+    final actions = [
+      {'title': 'Direct Chat', 'icon': Icons.send_rounded, 'color': const Color(0xFF25D366), 'route': 'directChat'},
+      {'title': 'Status Saver', 'icon': Icons.download_rounded, 'color': Colors.blue, 'route': 'statusSaver'},
+      {'title': 'Deleted Msg', 'icon': Icons.mark_chat_unread_outlined, 'color': Colors.redAccent, 'route': 'deletedMessages'},
+      {'title': 'Link Maker', 'icon': Icons.qr_code, 'color': Colors.amber[800]!, 'route': 'linkGenerator'},
+    ];
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: actions.map((a) {
+        final color = a['color'] as Color;
+        return Expanded(
+          child: GestureDetector(
+            onTap: () => context.pushNamed(a['route'] as String),
+            child: Column(
+              children: [
+                Container(
+                  width: 54.w,
+                  height: 54.w,
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(a['icon'] as IconData, color: color, size: 24.sp),
+                ),
+                SizedBox(height: 6.h),
+                Text(
+                  a['title'] as String,
+                  style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.w600),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
   Widget _buildFeaturesGrid(BuildContext context) {
     final features = [
       {
-        'title': 'Direct Chat',
-        'subtitle': 'Message without saving',
-        'icon': Icons.chat_bubble_outline,
-        'route': 'directChat',
-        'color': Colors.blue,
+        'title': 'Message Reminders',
+        'subtitle': 'Schedule upcoming chats',
+        'icon': Icons.alarm,
+        'route': 'reminders',
+        'color': Colors.deepOrange,
       },
       {
-        'title': 'Status Saver',
-        'subtitle': 'Save videos & images',
-        'icon': Icons.download_outlined,
-        'route': 'statusSaver',
-        'color': Colors.green,
-      },
-      {
-        'title': 'Message Hub',
-        'subtitle': 'Templates & font styler',
-        'icon': Icons.chat_outlined,
-        'route': 'messageHub',
+        'title': 'Quick Replies',
+        'subtitle': 'Business & support templates',
+        'icon': Icons.quickreply_outlined,
+        'route': 'chatUtilities',
         'color': Colors.purple,
       },
       {
-        'title': 'Chat Utilities',
-        'subtitle': 'Quick replies & reminders',
-        'icon': Icons.handyman_outlined,
-        'route': 'chatUtilities',
-        'color': Colors.cyan,
+        'title': 'Private Vault',
+        'subtitle': 'PIN protected secret notes',
+        'icon': Icons.shield_outlined,
+        'route': 'privateVault',
+        'color': Colors.teal,
       },
       {
-        'title': 'Settings',
-        'subtitle': 'App preferences & lock',
-        'icon': Icons.settings_outlined,
-        'route': 'settings',
-        'color': Colors.grey,
+        'title': 'Image to Text',
+        'subtitle': 'Extract text from documents',
+        'icon': Icons.document_scanner_outlined,
+        'route': 'ocr',
+        'color': Colors.cyan[700]!,
       },
       {
-        'title': 'Profile',
-        'subtitle': 'User info & about',
-        'icon': Icons.person_outline,
-        'route': 'profile',
-        'color': Colors.deepOrange,
+        'title': 'Text Formatter',
+        'subtitle': 'Bold, italics, & bubble fonts',
+        'icon': Icons.text_format,
+        'route': 'textFormatter',
+        'color': Colors.pinkAccent,
+      },
+      {
+        'title': 'Clipboard Vault',
+        'subtitle': 'Save addresses & snippets',
+        'icon': Icons.assignment_outlined,
+        'route': 'clipboardManager',
+        'color': Colors.indigo,
       },
     ];
 
@@ -176,85 +348,179 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       physics: const NeverScrollableScrollPhysics(),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
-        crossAxisSpacing: 16.w,
-        mainAxisSpacing: 16.h,
-        childAspectRatio: 0.85,
+        crossAxisSpacing: 12.w,
+        mainAxisSpacing: 12.h,
+        childAspectRatio: 1.25,
       ),
       itemCount: features.length,
       itemBuilder: (context, index) {
-        final feature = features[index];
-        return _FeatureCard(
-          title: feature['title'] as String,
-          subtitle: feature['subtitle'] as String,
-          icon: feature['icon'] as IconData,
-          color: feature['color'] as Color,
-          onTap: () => context.pushNamed(feature['route'] as String),
+        final f = features[index];
+        final color = f['color'] as Color;
+
+        return Card(
+          elevation: 1,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18.r)),
+          child: InkWell(
+            onTap: () => context.pushNamed(f['route'] as String),
+            borderRadius: BorderRadius.circular(18.r),
+            child: Padding(
+              padding: EdgeInsets.all(14.w),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(8.w),
+                    decoration: BoxDecoration(
+                      color: color.withOpacity(0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(f['icon'] as IconData, color: color, size: 20.sp),
+                  ),
+                  const Spacer(),
+                  Text(
+                    f['title'] as String,
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5.sp),
+                  ),
+                  SizedBox(height: 2.h),
+                  Text(
+                    f['subtitle'] as String,
+                    style: TextStyle(fontSize: 10.5.sp, color: Colors.grey[600]),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ),
         );
       },
     );
   }
-}
 
-class _FeatureCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _FeatureCard({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Material(
-      color: theme.cardTheme.color,
-      borderRadius: BorderRadius.circular(24.r),
-      elevation: theme.cardTheme.elevation ?? 2,
-      shadowColor: theme.cardTheme.shadowColor,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(24.r),
-        child: Padding(
-          padding: EdgeInsets.all(20.w),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: EdgeInsets.all(12.w),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(icon, color: color, size: 28.sp),
-              ),
-              const Spacer(),
-              Text(
-                title,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              SizedBox(height: 4.h),
-              Text(
-                subtitle,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.textTheme.bodySmall?.color?.withOpacity(0.7),
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
+  Widget _buildAiSpotlightCard(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(18.w),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F1E29),
+        borderRadius: BorderRadius.circular(20.r),
+        border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
       ),
+      child: Row(
+        children: [
+          Container(
+            padding: EdgeInsets.all(12.w),
+            decoration: BoxDecoration(
+              color: Colors.blueAccent.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.auto_awesome, color: Colors.lightBlueAccent, size: 28.sp),
+          ),
+          SizedBox(width: 14.w),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'AI Message Suite',
+                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 15.sp),
+                    ),
+                    SizedBox(width: 6.w),
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
+                      decoration: BoxDecoration(
+                        color: Colors.lightBlueAccent.withOpacity(0.25),
+                        borderRadius: BorderRadius.circular(8.r),
+                      ),
+                      child: const Text('New', style: TextStyle(color: Colors.lightBlueAccent, fontSize: 9, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 4.h),
+                Text(
+                  'Generate smart replies & translate Hindi <-> English effortlessly.',
+                  style: TextStyle(fontSize: 11.5.sp, color: Colors.grey[400]),
+                ),
+                SizedBox(height: 10.h),
+                Row(
+                  children: [
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF25D366),
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 6.h),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
+                      ),
+                      onPressed: () => context.pushNamed('aiAssistant'),
+                      child: const Text('AI Replies', style: TextStyle(fontSize: 12)),
+                    ),
+                    SizedBox(width: 8.w),
+                    OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.lightBlueAccent,
+                        side: const BorderSide(color: Colors.lightBlueAccent),
+                        padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 6.h),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
+                      ),
+                      onPressed: () => context.pushNamed('aiTranslator'),
+                      child: const Text('Translator', style: TextStyle(fontSize: 12)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecentActivitySection() {
+    return ValueListenableBuilder(
+      valueListenable: HiveStorageService.history.listenable(),
+      builder: (context, Box box, _) {
+        if (box.isEmpty) {
+          return Container(
+            padding: EdgeInsets.all(20.w),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.grey.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(16.r),
+            ),
+            child: const Text('No recent activity recorded yet.', style: TextStyle(color: Colors.grey)),
+          );
+        }
+
+        final recent = box.values.toList().reversed.take(4).toList();
+
+        return ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: recent.length,
+          separatorBuilder: (_, __) => SizedBox(height: 8.h),
+          itemBuilder: (context, index) {
+            final item = recent[index] as Map;
+            final phone = item['phone']?.toString() ?? 'Direct Chat';
+            final msg = item['message']?.toString() ?? '';
+            final type = item['type']?.toString() ?? 'Chat';
+
+            return Card(
+              elevation: 0.8,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14.r)),
+              child: ListTile(
+                dense: true,
+                leading: CircleAvatar(
+                  backgroundColor: const Color(0xFF25D366).withOpacity(0.12),
+                  child: const Icon(Icons.history, color: Color(0xFF25D366), size: 18),
+                ),
+                title: Text('$type: $phone', style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: msg.isNotEmpty ? Text(msg, maxLines: 1, overflow: TextOverflow.ellipsis) : null,
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

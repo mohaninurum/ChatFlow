@@ -67,6 +67,44 @@ class MainActivity : FlutterActivity() {
                         result.error("INVALID_PATH", "File path is null", null)
                     }
                 }
+                "isNotificationAccessGranted" -> {
+                    try {
+                        val enabledListeners = android.provider.Settings.Secure.getString(
+                            contentResolver,
+                            "enabled_notification_listeners"
+                        )
+                        val isGranted = enabledListeners?.contains(packageName) == true
+                        result.success(isGranted)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                "openNotificationSettings" -> {
+                    try {
+                        val intent = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("SETTINGS_ERROR", e.message, null)
+                    }
+                }
+                "shareText" -> {
+                    val text = call.argument<String>("text")
+                    val title = call.argument<String>("title") ?: "Share via"
+                    if (text != null) {
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, text)
+                        }
+                        val chooser = Intent.createChooser(intent, title)
+                        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(chooser)
+                        result.success(true)
+                    } else {
+                        result.error("INVALID_TEXT", "Text is null", null)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
