@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/storage/hive_storage_service.dart';
 
 enum StatusSortOrder { newest, oldest, largest, smallest }
@@ -16,7 +17,7 @@ class StatusSaverScreen extends ConsumerStatefulWidget {
 }
 
 class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   static const _channel = MethodChannel('com.chatflow.app/channel');
   late TabController _tabController;
 
@@ -33,13 +34,40 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
   // Sort & filter state
   StatusSortOrder _sortOrder = StatusSortOrder.newest;
   bool _showFavoritesOnly = false;
-  String _searchQuery = '';
+  final String _searchQuery = '';
 
   final List<String> _whatsappPaths = [
+    // WhatsApp Standard
     '/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media/.Statuses',
     '/storage/emulated/0/WhatsApp/Media/.Statuses',
+    '/sdcard/Android/media/com.whatsapp/WhatsApp/Media/.Statuses',
+    '/sdcard/WhatsApp/Media/.Statuses',
+    '/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media/Statuses',
+    '/storage/emulated/0/WhatsApp/Media/Statuses',
+
+    // WhatsApp Business
     '/storage/emulated/0/Android/media/com.whatsapp.w4b/WhatsApp Business/Media/.Statuses',
     '/storage/emulated/0/WhatsApp Business/Media/.Statuses',
+    '/sdcard/Android/media/com.whatsapp.w4b/WhatsApp Business/Media/.Statuses',
+    '/sdcard/WhatsApp Business/Media/.Statuses',
+    '/storage/emulated/0/Android/media/com.whatsapp.w4b/WhatsApp Business/Media/Statuses',
+    '/storage/emulated/0/WhatsApp Business/Media/Statuses',
+
+    // Cloned / Dual Apps (Samsung Dual Messenger, Xiaomi Dual Apps, OnePlus Parallel)
+    '/storage/emulated/999/Android/media/com.whatsapp/WhatsApp/Media/.Statuses',
+    '/storage/emulated/999/WhatsApp/Media/.Statuses',
+    '/storage/emulated/999/Android/media/com.whatsapp.w4b/WhatsApp Business/Media/.Statuses',
+    '/storage/emulated/999/WhatsApp Business/Media/.Statuses',
+    '/storage/emulated/10/Android/media/com.whatsapp/WhatsApp/Media/.Statuses',
+    '/storage/emulated/10/WhatsApp/Media/.Statuses',
+    '/storage/emulated/11/Android/media/com.whatsapp/WhatsApp/Media/.Statuses',
+    '/storage/emulated/11/WhatsApp/Media/.Statuses',
+
+    // Modded WhatsApp variants
+    '/storage/emulated/0/Android/media/com.gbwhatsapp/GBWhatsApp/Media/.Statuses',
+    '/storage/emulated/0/GBWhatsApp/Media/.Statuses',
+    '/storage/emulated/0/Android/media/com.fmwhatsapp/FMWhatsApp/Media/.Statuses',
+    '/storage/emulated/0/Android/media/com.yowhatsapp/YoWhatsApp/Media/.Statuses',
   ];
 
   final String _savedDirectoryPath = '/storage/emulated/0/Pictures/Chatflow';
@@ -47,6 +75,7 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       if (mounted) setState(() {});
@@ -56,11 +85,43 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadStatuses();
+    }
+  }
+
+  Future<void> _openWhatsApp() async {
+    try {
+      final waUri = Uri.parse('whatsapp://');
+      if (await canLaunchUrl(waUri)) {
+        await launchUrl(waUri, mode: LaunchMode.externalApplication);
+      } else {
+        final webUri = Uri.parse('https://chat.whatsapp.com');
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _requestManageAccess() async {
+    try {
+      final res = await _channel.invokeMethod('requestManageStorage');
+      if (res != true) {
+        await openAppSettings();
+      }
+    } catch (_) {
+      await openAppSettings();
+    }
+  }
+
   Future<void> _loadStatuses() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _permissionDenied = false;
@@ -68,44 +129,83 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
       _selectedFilePaths.clear();
     });
 
-    // Request permissions
-    final storageStatus = await Permission.storage.request();
-    final photosStatus = await Permission.photos.request();
-    final videosStatus = await Permission.videos.request();
+    // Check storage permissions
+    bool isGranted = false;
+    if (Platform.isAndroid) {
+      try {
+        isGranted = await _channel.invokeMethod('isManageStorageGranted') ?? false;
+      } catch (_) {
+        isGranted = await Permission.manageExternalStorage.isGranted;
+      }
 
-    if (storageStatus.isDenied && photosStatus.isDenied && videosStatus.isDenied) {
-      setState(() {
-        _isLoading = false;
-        _permissionDenied = true;
-      });
-      return;
+      if (!isGranted) {
+        // Check standard media permissions as well
+        final storage = await Permission.storage.isGranted;
+        final photos = await Permission.photos.isGranted;
+        final videos = await Permission.videos.isGranted;
+        if (storage || photos || videos) {
+          isGranted = true;
+        } else {
+          // Request permissions once
+          await [
+            Permission.storage,
+            Permission.photos,
+            Permission.videos,
+          ].request();
+          
+          try {
+            isGranted = await _channel.invokeMethod('isManageStorageGranted') ?? false;
+          } catch (_) {}
+        }
+      }
     }
 
     final List<File> photos = [];
     final List<File> videos = [];
     final List<File> savedList = [];
+    final Set<String> seenPaths = {};
 
-    // 1. Scan WhatsApp & WA Business status directories
+    // 1. Scan via Native MethodChannel (covers all paths in background thread)
+    try {
+      final List<dynamic>? nativeMedia = await _channel.invokeMethod<List<dynamic>>('getStatusMedia');
+      if (nativeMedia != null) {
+        for (var p in nativeMedia) {
+          final file = File(p.toString());
+          if (file.existsSync() && seenPaths.add(file.path)) {
+            final ext = file.path.split('.').last.toLowerCase();
+            if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
+              photos.add(file);
+            } else if (['mp4', 'mkv', '3gp', 'mov', 'gif'].contains(ext)) {
+              videos.add(file);
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 2. Direct Dart scan across all WhatsApp paths for 100% thoroughness
     for (var path in _whatsappPaths) {
       try {
         final dir = Directory(path);
-        if (await dir.exists()) {
-          final items = dir.listSync();
-          for (var item in items) {
-            if (item is File) {
-              final ext = item.path.split('.').last.toLowerCase();
-              if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
-                photos.add(item);
-              } else if (['mp4', 'mkv', '3gp'].contains(ext)) {
-                videos.add(item);
-              }
+        final items = dir.listSync();
+        for (var item in items) {
+          if (item is File && seenPaths.add(item.path)) {
+            final name = item.path.split('/').last.split('\\').last;
+            if (name.startsWith('.nomedia') || name.endsWith('.tmp') || name.endsWith('.thumb')) {
+              continue;
+            }
+            final ext = name.split('.').last.toLowerCase();
+            if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
+              photos.add(item);
+            } else if (['mp4', 'mkv', '3gp', 'mov', 'gif'].contains(ext)) {
+              videos.add(item);
             }
           }
         }
       } catch (_) {}
     }
 
-    // 2. Scan Chatflow saved directory (Download History)
+    // 3. Scan Chatflow saved directory (Download History)
     try {
       final savedDir = Directory(_savedDirectoryPath);
       if (await savedDir.exists()) {
@@ -122,12 +222,21 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     _sortFiles(videos);
     _sortFiles(savedList);
 
-    setState(() {
-      _photos = photos;
-      _videos = videos;
-      _savedDownloads = savedList;
-      _isLoading = false;
-    });
+    if (mounted) {
+      // Auto-switch to Videos tab if no photos are available but video statuses are loaded!
+      if (photos.isEmpty && videos.isNotEmpty && _tabController.index == 0) {
+        _tabController.animateTo(1);
+      }
+
+      setState(() {
+        _photos = photos;
+        _videos = videos;
+        _savedDownloads = savedList;
+        _isLoading = false;
+        // If files are loaded, permissions are working!
+        _permissionDenied = (photos.isEmpty && videos.isEmpty && !isGranted);
+      });
+    }
   }
 
   void _sortFiles(List<File> list) {
@@ -425,6 +534,11 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
             ),
           ] else ...[
             IconButton(
+              icon: const Icon(Icons.chat_bubble_outline),
+              tooltip: 'Open WhatsApp',
+              onPressed: _openWhatsApp,
+            ),
+            IconButton(
               icon: Icon(
                 _showFavoritesOnly ? Icons.star : Icons.star_border,
                 color: _showFavoritesOnly ? Colors.amber : null,
@@ -486,32 +600,48 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
   Widget _buildPermissionPrompt() {
     return Center(
       child: Padding(
-        padding: EdgeInsets.all(24.w),
+        padding: EdgeInsets.all(28.w),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.folder_special, size: 70.sp, color: Colors.orange),
-            SizedBox(height: 16.h),
-            const Text(
-              'Storage & Media Permission Required',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            Container(
+              padding: EdgeInsets.all(20.w),
+              decoration: BoxDecoration(
+                color: Colors.amber.withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.folder_special_rounded, size: 54.sp, color: Colors.amber[800]),
+            ),
+            SizedBox(height: 20.h),
+            Text(
+              'Automatic WhatsApp Status Sync',
+              style: TextStyle(fontSize: 19.sp, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
-            SizedBox(height: 8.h),
-            const Text(
-              'Chatflow needs permission to access WhatsApp and WhatsApp Business status media on your device.',
+            SizedBox(height: 10.h),
+            Text(
+              'Allow storage access once so Chatflow can automatically detect and display WhatsApp statuses without asking you to pick folders.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey),
+              style: TextStyle(color: Colors.grey[600], fontSize: 13.5.sp, height: 1.4),
             ),
             SizedBox(height: 24.h),
-            ElevatedButton(
-              onPressed: _loadStatuses,
+            ElevatedButton.icon(
+              onPressed: _requestManageAccess,
+              icon: const Icon(Icons.security_update_good_rounded),
+              label: const Text('Allow Automatic Access'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF25D366),
                 foregroundColor: Colors.white,
-                padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 12.h),
+                padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 13.h),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
+                elevation: 2,
               ),
-              child: const Text('Grant Permission'),
+            ),
+            SizedBox(height: 12.h),
+            TextButton.icon(
+              onPressed: _loadStatuses,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Check Again'),
             ),
           ],
         ),
@@ -521,53 +651,91 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
 
   Widget _buildMediaGrid(List<File> files, {required bool isVideo, required bool isSavedTab}) {
     if (files.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: EdgeInsets.all(32.w),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                isSavedTab
-                    ? Icons.save_alt_rounded
-                    : (isVideo ? Icons.videocam_off_outlined : Icons.image_not_supported_outlined),
-                size: 64.sp,
-                color: Colors.grey,
-              ),
-              SizedBox(height: 16.h),
-              Text(
-                isSavedTab
-                    ? 'No Downloaded Media Yet'
-                    : (_showFavoritesOnly ? 'No Favorite Statuses Found' : 'No Statuses Available'),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-              SizedBox(height: 8.h),
-              Text(
-                isSavedTab
-                    ? 'Downloaded statuses will be saved permanently to Pictures/Chatflow and displayed here.'
-                    : 'Open WhatsApp or WhatsApp Business, view your friends\' statuses, then tap refresh here.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.grey),
-              ),
-              SizedBox(height: 16.h),
-              if (!isSavedTab)
-                ElevatedButton.icon(
-                  onPressed: _loadStatuses,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Refresh Statuses'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF25D366),
-                    foregroundColor: Colors.white,
-                  ),
+      return RefreshIndicator(
+        onRefresh: _loadStatuses,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            SizedBox(height: 80.h),
+            Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 28.w),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: EdgeInsets.all(20.w),
+                      decoration: BoxDecoration(
+                        color: isSavedTab
+                            ? Colors.blueAccent.withOpacity(0.12)
+                            : const Color(0xFF25D366).withOpacity(0.12),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        isSavedTab
+                            ? Icons.download_done_rounded
+                            : (isVideo ? Icons.videocam_outlined : Icons.photo_library_outlined),
+                        size: 50.sp,
+                        color: isSavedTab ? Colors.blueAccent : const Color(0xFF25D366),
+                      ),
+                    ),
+                    SizedBox(height: 18.h),
+                    Text(
+                      isSavedTab
+                          ? 'No Saved Statuses Yet'
+                          : (_showFavoritesOnly
+                              ? 'No Favorite Statuses'
+                              : (isVideo ? 'No Video Statuses Available' : 'No Photo Statuses Available')),
+                      style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                    SizedBox(height: 8.h),
+                    Text(
+                      isSavedTab
+                          ? 'Saved statuses are stored permanently in Pictures/Chatflow and will appear here.'
+                          : (_showFavoritesOnly
+                              ? 'Star any status to add it to your favorites list.'
+                              : 'Statuses are automatically loaded here after you view them in WhatsApp. Open WhatsApp, watch your friends\' statuses, and return here!'),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey[600], fontSize: 13.5.sp, height: 1.4),
+                    ),
+                    SizedBox(height: 24.h),
+                    if (!isSavedTab) ...[
+                      ElevatedButton.icon(
+                        onPressed: _openWhatsApp,
+                        icon: const Icon(Icons.chat_bubble_outline),
+                        label: const Text('Open WhatsApp'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF25D366),
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 13.h),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
+                          elevation: 2,
+                        ),
+                      ),
+                      SizedBox(height: 12.h),
+                    ],
+                    OutlinedButton.icon(
+                      onPressed: _loadStatuses,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Refresh Statuses'),
+                      style: OutlinedButton.styleFrom(
+                        padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 11.h),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14.r)),
+                      ),
+                    ),
+                  ],
                 ),
-            ],
-          ),
+              ),
+            ),
+          ],
         ),
       );
     }
 
-    return GridView.builder(
+    return RefreshIndicator(
+      onRefresh: _loadStatuses,
+      child: GridView.builder(
       padding: EdgeInsets.all(10.w),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
@@ -715,6 +883,7 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
           ),
         );
       },
-    );
+    ),
+  );
   }
 }

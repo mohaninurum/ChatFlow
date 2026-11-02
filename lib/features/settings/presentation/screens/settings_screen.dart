@@ -42,7 +42,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _checkPermissions() async {
-    final storage = await Permission.storage.isGranted || await Permission.photos.isGranted;
+    bool storage = false;
+    if (Platform.isAndroid) {
+      try {
+        storage = await _channel.invokeMethod('isManageStorageGranted') ?? false;
+      } catch (_) {
+        storage = await Permission.manageExternalStorage.isGranted;
+      }
+      if (!storage) {
+        storage = await Permission.storage.isGranted || await Permission.photos.isGranted;
+      }
+    } else {
+      storage = await Permission.photos.isGranted;
+    }
+
     bool notification = false;
     try {
       notification = await _channel.invokeMethod('isNotificationAccessGranted') ?? false;
@@ -284,10 +297,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               color: _storageGranted ? Colors.green : Colors.orange,
             ),
             title: const Text('Storage & Media Access'),
-            subtitle: Text(_storageGranted ? 'Granted' : 'Tap to grant permission'),
+            subtitle: Text(_storageGranted ? 'Granted (All Files Access Active)' : 'Disabled - Tap to enable All Files Access'),
             trailing: const Icon(Icons.arrow_forward_ios, size: 14),
             onTap: () async {
-              await [Permission.storage, Permission.photos, Permission.videos].request();
+              try {
+                await _channel.invokeMethod('requestManageStorage');
+              } catch (_) {
+                await [Permission.manageExternalStorage, Permission.storage, Permission.photos, Permission.videos].request();
+              }
               await _checkPermissions();
             },
           ),
