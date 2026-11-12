@@ -23,16 +23,12 @@ class MainActivity : FlutterActivity() {
         // WhatsApp Standard
         "/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media/.Statuses",
         "/storage/emulated/0/WhatsApp/Media/.Statuses",
-        "/sdcard/Android/media/com.whatsapp/WhatsApp/Media/.Statuses",
-        "/sdcard/WhatsApp/Media/.Statuses",
         "/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media/Statuses",
         "/storage/emulated/0/WhatsApp/Media/Statuses",
 
         // WhatsApp Business
         "/storage/emulated/0/Android/media/com.whatsapp.w4b/WhatsApp Business/Media/.Statuses",
         "/storage/emulated/0/WhatsApp Business/Media/.Statuses",
-        "/sdcard/Android/media/com.whatsapp.w4b/WhatsApp Business/Media/.Statuses",
-        "/sdcard/WhatsApp Business/Media/.Statuses",
         "/storage/emulated/0/Android/media/com.whatsapp.w4b/WhatsApp Business/Media/Statuses",
         "/storage/emulated/0/WhatsApp Business/Media/Statuses",
 
@@ -405,22 +401,10 @@ class MainActivity : FlutterActivity() {
                 "getStatusMedia" -> {
                     Thread {
                         val fileList = mutableListOf<String>()
-                        val visitedPaths = HashSet<String>()
+                        val visitedKeys = HashSet<String>()
 
                         val searchPaths = mutableListOf<String>()
                         searchPaths.addAll(directWhatsappPaths)
-
-                        val extDir = Environment.getExternalStorageDirectory()
-                        if (extDir != null) {
-                            searchPaths.add(File(extDir, "Android/media/com.whatsapp/WhatsApp/Media/.Statuses").absolutePath)
-                            searchPaths.add(File(extDir, "WhatsApp/Media/.Statuses").absolutePath)
-                            searchPaths.add(File(extDir, "Android/media/com.whatsapp.w4b/WhatsApp Business/Media/.Statuses").absolutePath)
-                            searchPaths.add(File(extDir, "WhatsApp Business/Media/.Statuses").absolutePath)
-                            searchPaths.add(File(extDir, "Android/media/com.whatsapp/WhatsApp/Media/Statuses").absolutePath)
-                            searchPaths.add(File(extDir, "WhatsApp/Media/Statuses").absolutePath)
-                            searchPaths.add(File(extDir, "Android/media/com.whatsapp.w4b/WhatsApp Business/Media/Statuses").absolutePath)
-                            searchPaths.add(File(extDir, "WhatsApp Business/Media/Statuses").absolutePath)
-                        }
 
                         // 1. Direct scan without restrictive canRead or exists check (handles all Android 11-16 versions)
                         for (dirPath in searchPaths) {
@@ -432,8 +416,9 @@ class MainActivity : FlutterActivity() {
                                         if (f.isFile && !f.name.startsWith(".nomedia") && !f.name.endsWith(".tmp") && !f.name.endsWith(".thumb")) {
                                             val ext = f.name.substringAfterLast('.', "").lowercase()
                                             if (ext in listOf("jpg", "jpeg", "png", "webp", "mp4", "mkv", "3gp", "mov", "gif")) {
-                                                if (visitedPaths.add(f.absolutePath)) {
-                                                    fileList.add(f.absolutePath)
+                                                val dedupKey = "${f.name.lowercase()}_${f.length()}"
+                                                if (visitedKeys.add(dedupKey)) {
+                                                    fileList.add(f.canonicalPath)
                                                 }
                                             }
                                         }
@@ -458,16 +443,17 @@ class MainActivity : FlutterActivity() {
                                         if (doc.isFile && doc.name != null && !doc.name!!.startsWith(".nomedia") && !doc.name!!.endsWith(".tmp")) {
                                             val ext = doc.name!!.substringAfterLast('.', "").lowercase()
                                             if (ext in listOf("jpg", "jpeg", "png", "webp", "mp4", "mkv", "3gp", "mov", "gif")) {
-                                                val cachedFile = File(cacheDir, doc.name!!)
-                                                if (!cachedFile.exists() || cachedFile.length() != doc.length()) {
-                                                    contentResolver.openInputStream(doc.uri)?.use { input ->
-                                                        cachedFile.outputStream().use { output ->
-                                                            input.copyTo(output)
+                                                val dedupKey = "${doc.name!!.lowercase()}_${doc.length()}"
+                                                if (visitedKeys.add(dedupKey)) {
+                                                    val cachedFile = File(cacheDir, doc.name!!)
+                                                    if (!cachedFile.exists() || cachedFile.length() != doc.length()) {
+                                                        contentResolver.openInputStream(doc.uri)?.use { input ->
+                                                            cachedFile.outputStream().use { output ->
+                                                                input.copyTo(output)
+                                                            }
                                                         }
                                                     }
-                                                }
-                                                if (visitedPaths.add(cachedFile.absolutePath)) {
-                                                    fileList.add(cachedFile.absolutePath)
+                                                    fileList.add(cachedFile.canonicalPath)
                                                 }
                                             }
                                         }

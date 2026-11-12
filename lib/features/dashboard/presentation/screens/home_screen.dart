@@ -68,30 +68,17 @@ class HomeScreen extends ConsumerWidget {
               delegate: SliverChildListDelegate([
                 // Welcome Hero Card
                 _buildHeroCard(context, colorScheme),
-                SizedBox(height: 20.h),
-
-                // Live Database Metrics Row
-                _buildMetricsRow(theme),
                 SizedBox(height: 24.h),
 
-                // Quick Actions Header
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Quick Actions',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16.sp,
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () => context.pushNamed('chatUtilities'),
-                      child: const Text('View All'),
-                    ),
-                  ],
+                // Quick Actions Header (clean, without View All button)
+                Text(
+                  'Quick Actions',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16.sp,
+                  ),
                 ),
-                SizedBox(height: 8.h),
+                SizedBox(height: 12.h),
                 _buildQuickActionsRow(context),
                 SizedBox(height: 24.h),
 
@@ -105,10 +92,6 @@ class HomeScreen extends ConsumerWidget {
                 ),
                 SizedBox(height: 12.h),
                 _buildFeaturesGrid(context),
-                SizedBox(height: 24.h),
-
-                // AI Spotlight Card
-                _buildAiSpotlightCard(context),
                 SizedBox(height: 24.h),
 
                 // Recent Activities Header & List
@@ -143,7 +126,7 @@ class HomeScreen extends ConsumerWidget {
         borderRadius: BorderRadius.circular(24.r),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF25D366).withOpacity(0.3),
+            color: const Color(0xFF25D366).withValues(alpha: 0.3),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -158,7 +141,7 @@ class HomeScreen extends ConsumerWidget {
               Container(
                 padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
+                  color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(20.r),
                 ),
                 child: const Row(
@@ -205,56 +188,6 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildMetricsRow(ThemeData theme) {
-    return ValueListenableBuilder(
-      valueListenable: HiveStorageService.history.listenable(),
-      builder: (context, Box historyBox, _) {
-        final chats = historyBox.length;
-        final templates = HiveStorageService.templates.length;
-        final downloads = HiveStorageService.statusDownloads.length;
-
-        return Row(
-          children: [
-            _buildMetricPill(theme, '$chats', 'Chats Sent', Icons.chat_bubble_outline, Colors.blue),
-            SizedBox(width: 10.w),
-            _buildMetricPill(theme, '$templates', 'Templates', Icons.auto_stories, Colors.purple),
-            SizedBox(width: 10.w),
-            _buildMetricPill(theme, '$downloads', 'Saved Status', Icons.download_done, Colors.green),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildMetricPill(ThemeData theme, String val, String title, IconData icon, Color color) {
-    return Expanded(
-      child: Container(
-        padding: EdgeInsets.symmetric(vertical: 12.h, horizontal: 10.w),
-        decoration: BoxDecoration(
-          color: theme.cardTheme.color,
-          borderRadius: BorderRadius.circular(16.r),
-          border: Border.all(color: Colors.grey.withOpacity(0.15)),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 20.sp),
-            SizedBox(height: 4.h),
-            Text(
-              val,
-              style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold, color: color),
-            ),
-            Text(
-              title,
-              style: TextStyle(fontSize: 10.sp, color: Colors.grey[600]),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildQuickActionsRow(BuildContext context) {
     final actions = [
       {'title': 'Direct Chat', 'icon': Icons.send_rounded, 'color': const Color(0xFF25D366), 'route': 'directChat'},
@@ -276,7 +209,7 @@ class HomeScreen extends ConsumerWidget {
                   width: 54.w,
                   height: 54.w,
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.12),
+                    color: color.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(a['icon'] as IconData, color: color, size: 24.sp),
@@ -306,20 +239,6 @@ class HomeScreen extends ConsumerWidget {
         'color': Colors.deepOrange,
       },
       {
-        'title': 'Quick Replies',
-        'subtitle': 'Business & support templates',
-        'icon': Icons.quickreply_outlined,
-        'route': 'chatUtilities',
-        'color': Colors.purple,
-      },
-      {
-        'title': 'Private Vault',
-        'subtitle': 'PIN protected secret notes',
-        'icon': Icons.shield_outlined,
-        'route': 'privateVault',
-        'color': Colors.teal,
-      },
-      {
         'title': 'Image to Text',
         'subtitle': 'Extract text from documents',
         'icon': Icons.document_scanner_outlined,
@@ -334,11 +253,11 @@ class HomeScreen extends ConsumerWidget {
         'color': Colors.pinkAccent,
       },
       {
-        'title': 'Clipboard Vault',
-        'subtitle': 'Save addresses & snippets',
-        'icon': Icons.assignment_outlined,
-        'route': 'clipboardManager',
-        'color': Colors.indigo,
+        'title': 'Link Generator',
+        'subtitle': 'Create wa.me links & QR codes',
+        'icon': Icons.qr_code_2_rounded,
+        'route': 'linkGenerator',
+        'color': Colors.blueAccent,
       },
     ];
 
@@ -371,7 +290,7 @@ class HomeScreen extends ConsumerWidget {
                   Container(
                     padding: EdgeInsets.all(8.w),
                     decoration: BoxDecoration(
-                      color: color.withOpacity(0.12),
+                      color: color.withValues(alpha: 0.12),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(f['icon'] as IconData, color: color, size: 20.sp),
@@ -397,85 +316,6 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildAiSpotlightCard(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.all(18.w),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F1E29),
-        borderRadius: BorderRadius.circular(20.r),
-        border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: EdgeInsets.all(12.w),
-            decoration: BoxDecoration(
-              color: Colors.blueAccent.withOpacity(0.2),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(Icons.auto_awesome, color: Colors.lightBlueAccent, size: 28.sp),
-          ),
-          SizedBox(width: 14.w),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      'AI Message Suite',
-                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 15.sp),
-                    ),
-                    SizedBox(width: 6.w),
-                    Container(
-                      padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
-                      decoration: BoxDecoration(
-                        color: Colors.lightBlueAccent.withOpacity(0.25),
-                        borderRadius: BorderRadius.circular(8.r),
-                      ),
-                      child: const Text('New', style: TextStyle(color: Colors.lightBlueAccent, fontSize: 9, fontWeight: FontWeight.bold)),
-                    ),
-                  ],
-                ),
-                SizedBox(height: 4.h),
-                Text(
-                  'Generate smart replies & translate Hindi <-> English effortlessly.',
-                  style: TextStyle(fontSize: 11.5.sp, color: Colors.grey[400]),
-                ),
-                SizedBox(height: 10.h),
-                Row(
-                  children: [
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF25D366),
-                        foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 6.h),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
-                      ),
-                      onPressed: () => context.pushNamed('aiAssistant'),
-                      child: const Text('AI Replies', style: TextStyle(fontSize: 12)),
-                    ),
-                    SizedBox(width: 8.w),
-                    OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.lightBlueAccent,
-                        side: const BorderSide(color: Colors.lightBlueAccent),
-                        padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 6.h),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
-                      ),
-                      onPressed: () => context.pushNamed('aiTranslator'),
-                      child: const Text('Translator', style: TextStyle(fontSize: 12)),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildRecentActivitySection() {
     return ValueListenableBuilder(
       valueListenable: HiveStorageService.history.listenable(),
@@ -485,7 +325,7 @@ class HomeScreen extends ConsumerWidget {
             padding: EdgeInsets.all(20.w),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: Colors.grey.withOpacity(0.08),
+              color: Colors.grey.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(16.r),
             ),
             child: const Text('No recent activity recorded yet.', style: TextStyle(color: Colors.grey)),
@@ -498,7 +338,7 @@ class HomeScreen extends ConsumerWidget {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: recent.length,
-          separatorBuilder: (_, __) => SizedBox(height: 8.h),
+          separatorBuilder: (context, index) => SizedBox(height: 8.h),
           itemBuilder: (context, index) {
             final item = recent[index] as Map;
             final phone = item['phone']?.toString() ?? 'Direct Chat';
@@ -511,7 +351,7 @@ class HomeScreen extends ConsumerWidget {
               child: ListTile(
                 dense: true,
                 leading: CircleAvatar(
-                  backgroundColor: const Color(0xFF25D366).withOpacity(0.12),
+                  backgroundColor: const Color(0xFF25D366).withValues(alpha: 0.12),
                   child: const Icon(Icons.history, color: Color(0xFF25D366), size: 18),
                 ),
                 title: Text('$type: $phone', style: const TextStyle(fontWeight: FontWeight.bold)),

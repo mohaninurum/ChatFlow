@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +6,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/storage/hive_storage_service.dart';
+import 'status_viewer_screen.dart';
 
 enum StatusSortOrder { newest, oldest, largest, smallest }
 
@@ -42,16 +42,12 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     // WhatsApp Standard
     '/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media/.Statuses',
     '/storage/emulated/0/WhatsApp/Media/.Statuses',
-    '/sdcard/Android/media/com.whatsapp/WhatsApp/Media/.Statuses',
-    '/sdcard/WhatsApp/Media/.Statuses',
     '/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media/Statuses',
     '/storage/emulated/0/WhatsApp/Media/Statuses',
 
     // WhatsApp Business
     '/storage/emulated/0/Android/media/com.whatsapp.w4b/WhatsApp Business/Media/.Statuses',
     '/storage/emulated/0/WhatsApp Business/Media/.Statuses',
-    '/sdcard/Android/media/com.whatsapp.w4b/WhatsApp Business/Media/.Statuses',
-    '/sdcard/WhatsApp Business/Media/.Statuses',
     '/storage/emulated/0/Android/media/com.whatsapp.w4b/WhatsApp Business/Media/Statuses',
     '/storage/emulated/0/WhatsApp Business/Media/Statuses',
 
@@ -78,7 +74,7 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(() {
       if (mounted) setState(() {});
     });
@@ -165,22 +161,47 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     final List<File> photos = [];
     final List<File> videos = [];
     final List<File> savedList = [];
-    final Set<String> seenPaths = {};
+    final Set<String> seenStatusKeys = {};
+
+    void addStatusIfUnique(File file) {
+      try {
+        if (!file.existsSync()) return;
+        final name = file.path.split('/').last.split('\\').last;
+        if (name.isEmpty ||
+            name.startsWith('.nomedia') ||
+            name.endsWith('.tmp') ||
+            name.endsWith('.thumb')) {
+          return;
+        }
+
+        // Deduplication key: lowercased filename + file size
+        // If two paths point to the same file (e.g. /sdcard/... and /storage/emulated/0/...),
+        // they have the exact same filename and byte length!
+        int fileSize = 0;
+        try {
+          fileSize = file.lengthSync();
+        } catch (_) {}
+
+        final dedupKey = '${name.toLowerCase()}_$fileSize';
+        if (!seenStatusKeys.add(dedupKey)) {
+          return; // Duplicate status already added!
+        }
+
+        final ext = name.split('.').last.toLowerCase();
+        if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
+          photos.add(file);
+        } else if (['mp4', 'mkv', '3gp', 'mov', 'gif'].contains(ext)) {
+          videos.add(file);
+        }
+      } catch (_) {}
+    }
 
     // 1. Scan via Native MethodChannel (covers all paths in background thread)
     try {
       final List<dynamic>? nativeMedia = await _channel.invokeMethod<List<dynamic>>('getStatusMedia');
       if (nativeMedia != null) {
         for (var p in nativeMedia) {
-          final file = File(p.toString());
-          if (file.existsSync() && seenPaths.add(file.path)) {
-            final ext = file.path.split('.').last.toLowerCase();
-            if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
-              photos.add(file);
-            } else if (['mp4', 'mkv', '3gp', 'mov', 'gif'].contains(ext)) {
-              videos.add(file);
-            }
-          }
+          addStatusIfUnique(File(p.toString()));
         }
       }
     } catch (_) {}
@@ -189,18 +210,11 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     for (var path in _whatsappPaths) {
       try {
         final dir = Directory(path);
-        final items = dir.listSync();
-        for (var item in items) {
-          if (item is File && seenPaths.add(item.path)) {
-            final name = item.path.split('/').last.split('\\').last;
-            if (name.startsWith('.nomedia') || name.endsWith('.tmp') || name.endsWith('.thumb')) {
-              continue;
-            }
-            final ext = name.split('.').last.toLowerCase();
-            if (['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
-              photos.add(item);
-            } else if (['mp4', 'mkv', '3gp', 'mov', 'gif'].contains(ext)) {
-              videos.add(item);
+        if (dir.existsSync()) {
+          final items = dir.listSync();
+          for (var item in items) {
+            if (item is File) {
+              addStatusIfUnique(item);
             }
           }
         }
@@ -208,13 +222,17 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     }
 
     // 3. Scan Chatflow saved directory (Download History)
+    final Set<String> seenSaved = {};
     try {
       final savedDir = Directory(_savedDirectoryPath);
       if (await savedDir.exists()) {
         final items = savedDir.listSync();
         for (var item in items) {
           if (item is File) {
-            savedList.add(item);
+            final name = item.path.split('/').last.split('\\').last.toLowerCase();
+            if (seenSaved.add(name)) {
+              savedList.add(item);
+            }
           }
         }
       }
@@ -225,11 +243,6 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     _sortFiles(savedList);
 
     if (mounted) {
-      // Auto-switch to Videos tab if no photos are available but video statuses are loaded!
-      if (photos.isEmpty && videos.isNotEmpty && _tabController.index == 0) {
-        _tabController.animateTo(1);
-      }
-
       setState(() {
         _photos = photos;
         _videos = videos;
@@ -432,7 +445,7 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
         Image.memory(
           bytes,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Container(
+          errorBuilder: (context, error, stackTrace) => Container(
             color: Colors.black87,
             child: const Icon(Icons.videocam_outlined, color: Colors.white54),
           ),
@@ -451,96 +464,30 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     );
   }
 
-  Future<void> _openFile(File file, bool isVideo) async {
-    if (isVideo) {
-      try {
-        await _channel.invokeMethod('playVideoFullscreen', {
-          'path': file.path,
-        });
-      } catch (_) {
-        try {
-          await _channel.invokeMethod('openFile', {
-            'path': file.path,
-            'mimeType': 'video/mp4',
-          });
-        } catch (e) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Error playing video: $e')),
-            );
-          }
-        }
-      }
-    } else {
-      // Photo viewer with pinch-to-zoom
-      showDialog(
-        context: context,
-        builder: (ctx) => Dialog(
-          backgroundColor: Colors.black.withOpacity(0.9),
-          insetPadding: EdgeInsets.zero,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              InteractiveViewer(
-                panEnabled: true,
-                minScale: 0.5,
-                maxScale: 4.0,
-                child: Center(
-                  child: Image.file(file, fit: BoxFit.contain),
-                ),
-              ),
-              Positioned(
-                top: 40.h,
-                left: 16.w,
-                child: CircleAvatar(
-                  backgroundColor: Colors.black54,
-                  child: IconButton(
-                    icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    onPressed: () => Navigator.pop(ctx),
-                  ),
-                ),
-              ),
-              Positioned(
-                bottom: 30.h,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF25D366),
-                        foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 12.h),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.r)),
-                      ),
-                      icon: const Icon(Icons.download),
-                      label: const Text('Save to Gallery'),
-                      onPressed: () {
-                        _saveFile(file);
-                        Navigator.pop(ctx);
-                      },
-                    ),
-                    SizedBox(width: 12.w),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueAccent,
-                        foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 12.h),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.r)),
-                      ),
-                      icon: const Icon(Icons.share),
-                      label: const Text('Share'),
-                      onPressed: () {
-                        _shareFile(file, false);
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+  void _openViewer({
+    required List<File> files,
+    required int initialIndex,
+    List<File>? allFiles,
+    required bool isSavedTab,
+  }) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => StatusViewerScreen(
+          files: files,
+          initialIndex: initialIndex,
+          allFiles: allFiles,
+          isSavedTab: isSavedTab,
+          onSave: (file) => _saveFile(file, showNotification: false),
+          onShare: (file, isVideo) => _shareFile(file, isVideo),
+          onDelete: isSavedTab ? (file) => _deleteDownloadedFile(file) : null,
         ),
-      );
-    }
+      ),
+    ).then((_) {
+      if (mounted) {
+        _loadStatuses();
+      }
+    });
   }
 
   List<File> _filterFiles(List<File> originalList) {
@@ -562,6 +509,16 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    final Set<String> seenAll = {};
+    final List<File> allStatuses = [];
+    for (var f in [..._photos, ..._videos]) {
+      final name = f.path.split('/').last.split('\\').last.toLowerCase();
+      if (seenAll.add(name)) {
+        allStatuses.add(f);
+      }
+    }
+    _sortFiles(allStatuses);
+    final filteredAll = _filterFiles(allStatuses);
     final filteredPhotos = _filterFiles(_photos);
     final filteredVideos = _filterFiles(_videos);
     final filteredSaved = _filterFiles(_savedDownloads);
@@ -588,8 +545,10 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
               onPressed: () {
                 setState(() {
                   final activeList = _tabController.index == 0
-                      ? filteredPhotos
-                      : (_tabController.index == 1 ? filteredVideos : filteredSaved);
+                      ? filteredAll
+                      : (_tabController.index == 1
+                          ? filteredPhotos
+                          : (_tabController.index == 2 ? filteredVideos : filteredSaved));
                   _selectedFilePaths.addAll(activeList.map((f) => f.path));
                 });
               },
@@ -640,9 +599,12 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
         ],
         bottom: TabBar(
           controller: _tabController,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
           labelColor: theme.colorScheme.primary,
           indicatorColor: theme.colorScheme.primary,
           tabs: [
+            Tab(icon: const Icon(Icons.grid_view_rounded), text: 'All (${_photos.length + _videos.length})'),
             Tab(icon: const Icon(Icons.image_outlined), text: 'Photos (${_photos.length})'),
             Tab(icon: const Icon(Icons.video_library_outlined), text: 'Videos (${_videos.length})'),
             Tab(icon: const Icon(Icons.download_done_rounded), text: 'Saved (${_savedDownloads.length})'),
@@ -656,9 +618,10 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
               : TabBarView(
                   controller: _tabController,
                   children: [
-                    _buildMediaGrid(filteredPhotos, isVideo: false, isSavedTab: false),
-                    _buildMediaGrid(filteredVideos, isVideo: true, isSavedTab: false),
-                    _buildMediaGrid(filteredSaved, isVideo: false, isSavedTab: true),
+                    _buildMediaGrid(filteredAll, allFiles: filteredAll, isSavedTab: false, tabType: 'all'),
+                    _buildMediaGrid(filteredPhotos, allFiles: filteredAll, isSavedTab: false, tabType: 'photo'),
+                    _buildMediaGrid(filteredVideos, allFiles: filteredAll, isSavedTab: false, tabType: 'video'),
+                    _buildMediaGrid(filteredSaved, allFiles: filteredSaved, isSavedTab: true, tabType: 'saved'),
                   ],
                 ),
     );
@@ -674,7 +637,7 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
             Container(
               padding: EdgeInsets.all(20.w),
               decoration: BoxDecoration(
-                color: Colors.amber.withOpacity(0.12),
+                color: Colors.amber.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
               child: Icon(Icons.folder_special_rounded, size: 54.sp, color: Colors.amber[800]),
@@ -716,8 +679,43 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     );
   }
 
-  Widget _buildMediaGrid(List<File> files, {required bool isVideo, required bool isSavedTab}) {
+  Widget _buildMediaGrid(
+    List<File> files, {
+    List<File>? allFiles,
+    required bool isSavedTab,
+    required String tabType,
+  }) {
     if (files.isEmpty) {
+      IconData emptyIcon;
+      String emptyTitle;
+      String emptySubtitle;
+
+      if (isSavedTab) {
+        emptyIcon = Icons.download_done_rounded;
+        emptyTitle = 'No Saved Statuses Yet';
+        emptySubtitle =
+            'Saved statuses are stored permanently in Pictures/Chatflow and will appear here.';
+      } else if (_showFavoritesOnly) {
+        emptyIcon = Icons.star_border_rounded;
+        emptyTitle = 'No Favorite Statuses';
+        emptySubtitle = 'Star any status to add it to your favorites list.';
+      } else if (tabType == 'video') {
+        emptyIcon = Icons.videocam_outlined;
+        emptyTitle = 'No Video Statuses Available';
+        emptySubtitle =
+            'Statuses are automatically loaded here after you view them in WhatsApp. Open WhatsApp, watch your friends\' video statuses, and return here!';
+      } else if (tabType == 'photo') {
+        emptyIcon = Icons.photo_library_outlined;
+        emptyTitle = 'No Photo Statuses Available';
+        emptySubtitle =
+            'Statuses are automatically loaded here after you view them in WhatsApp. Open WhatsApp, watch your friends\' photo statuses, and return here!';
+      } else {
+        emptyIcon = Icons.perm_media_outlined;
+        emptyTitle = 'No Statuses Available';
+        emptySubtitle =
+            'Statuses are automatically loaded here after you view them in WhatsApp. Open WhatsApp, watch your friends\' statuses, and return here!';
+      }
+
       return RefreshIndicator(
         onRefresh: _loadStatuses,
         child: ListView(
@@ -734,35 +732,25 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
                       padding: EdgeInsets.all(20.w),
                       decoration: BoxDecoration(
                         color: isSavedTab
-                            ? Colors.blueAccent.withOpacity(0.12)
-                            : const Color(0xFF25D366).withOpacity(0.12),
+                            ? Colors.blueAccent.withValues(alpha: 0.12)
+                            : const Color(0xFF25D366).withValues(alpha: 0.12),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        isSavedTab
-                            ? Icons.download_done_rounded
-                            : (isVideo ? Icons.videocam_outlined : Icons.photo_library_outlined),
+                        emptyIcon,
                         size: 50.sp,
                         color: isSavedTab ? Colors.blueAccent : const Color(0xFF25D366),
                       ),
                     ),
                     SizedBox(height: 18.h),
                     Text(
-                      isSavedTab
-                          ? 'No Saved Statuses Yet'
-                          : (_showFavoritesOnly
-                              ? 'No Favorite Statuses'
-                              : (isVideo ? 'No Video Statuses Available' : 'No Photo Statuses Available')),
+                      emptyTitle,
                       style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold),
                       textAlign: TextAlign.center,
                     ),
                     SizedBox(height: 8.h),
                     Text(
-                      isSavedTab
-                          ? 'Saved statuses are stored permanently in Pictures/Chatflow and will appear here.'
-                          : (_showFavoritesOnly
-                              ? 'Star any status to add it to your favorites list.'
-                              : 'Statuses are automatically loaded here after you view them in WhatsApp. Open WhatsApp, watch your friends\' statuses, and return here!'),
+                      emptySubtitle,
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.grey[600], fontSize: 13.5.sp, height: 1.4),
                     ),
@@ -816,7 +804,7 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
         final path = file.path;
         final isSelected = _selectedFilePaths.contains(path);
         final isFav = HiveStorageService.getFavoriteStatuses().contains(path);
-        final fileIsVideo = isVideo || path.endsWith('.mp4') || path.endsWith('.mkv') || path.endsWith('.3gp');
+        final fileIsVideo = isStatusVideo(path);
 
         return Card(
           clipBehavior: Clip.antiAlias,
@@ -849,7 +837,12 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
                       }
                     });
                   } else {
-                    _openFile(file, fileIsVideo);
+                    _openViewer(
+                      files: files,
+                      initialIndex: index,
+                      allFiles: allFiles,
+                      isSavedTab: isSavedTab,
+                    );
                   }
                 },
                 child: fileIsVideo
@@ -857,7 +850,7 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
                     : Image.file(
                         file,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Center(
+                        errorBuilder: (context, error, stackTrace) => const Center(
                           child: Icon(Icons.broken_image, color: Colors.grey),
                         ),
                       ),
