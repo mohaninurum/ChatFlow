@@ -51,7 +51,15 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+        val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+
+        WhatsAppNotificationListenerService.onNewMessageCallback = { msgMap ->
+            runOnUiThread {
+                channel.invokeMethod("onNotificationReceived", msgMap)
+            }
+        }
+
+        channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "shareFile" -> {
                     val filePath = call.argument<String>("path")
@@ -312,7 +320,10 @@ class MainActivity : FlutterActivity() {
                             contentResolver,
                             "enabled_notification_listeners"
                         )
-                        val isGranted = enabledListeners?.contains(packageName) == true
+                        val isGranted = enabledListeners != null && (
+                            enabledListeners.contains(packageName) ||
+                            enabledListeners.contains("com.chatflow.app")
+                        )
                         result.success(isGranted)
                     } catch (e: Exception) {
                         result.success(false)
@@ -327,6 +338,14 @@ class MainActivity : FlutterActivity() {
                     } catch (e: Exception) {
                         result.error("SETTINGS_ERROR", e.message, null)
                     }
+                }
+                "getArchivedNotifications" -> {
+                    val notifications = WhatsAppNotificationListenerService.getArchivedNotifications(this)
+                    result.success(notifications)
+                }
+                "clearArchivedNotifications" -> {
+                    val cleared = WhatsAppNotificationListenerService.clearArchivedNotifications(this)
+                    result.success(cleared)
                 }
                 "shareText" -> {
                     val text = call.argument<String>("text")

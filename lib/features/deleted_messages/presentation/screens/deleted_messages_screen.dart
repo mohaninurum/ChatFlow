@@ -12,16 +12,86 @@ class DeletedMessagesScreen extends ConsumerStatefulWidget {
   ConsumerState<DeletedMessagesScreen> createState() => _DeletedMessagesScreenState();
 }
 
-class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
+class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen>
+    with WidgetsBindingObserver {
   static const _channel = MethodChannel('com.chatflow.app/channel');
   bool _isNotificationAccessGranted = false;
+  bool _isSyncing = false;
   String _searchQuery = '';
   String _activeFilter = 'All'; // 'All', 'Deleted Only', 'WA Business'
 
   @override
   void initState() {
     super.initState();
-    _checkNotificationPermission();
+    WidgetsBinding.instance.addObserver(this);
+    _channel.setMethodCallHandler(_handleNativeMethod);
+    _initFlow();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _initFlow();
+    }
+  }
+
+  Future<void> _initFlow() async {
+    await _checkNotificationPermission();
+    await _syncArchivedNotifications();
+  }
+
+  Future<dynamic> _handleNativeMethod(MethodCall call) async {
+    if (call.method == 'onNotificationReceived') {
+      final data = call.arguments;
+      if (data is Map) {
+        await _processIncomingNotification(data);
+      }
+    }
+  }
+
+  Future<void> _processIncomingNotification(Map data) async {
+    final box = HiveStorageService.deletedMessages;
+    final id = data['id']?.toString() ?? '';
+    final sender = data['sender']?.toString() ?? '';
+    final message = data['message']?.toString() ?? '';
+    final isDeleted = data['isDeleted'] == true;
+    final timestamp = data['timestamp']?.toString() ?? DateTime.now().toIso8601String();
+    final packageName = data['packageName']?.toString() ?? 'com.whatsapp';
+
+    if (isDeleted && sender.isNotEmpty) {
+      dynamic keyToUpdate;
+      Map? mapToUpdate;
+      for (var entry in box.toMap().entries) {
+        if (entry.value is Map && entry.value['sender'] == sender && entry.value['isDeleted'] != true) {
+          keyToUpdate = entry.key;
+          mapToUpdate = entry.value as Map;
+        }
+      }
+
+      if (keyToUpdate != null && mapToUpdate != null) {
+        final updated = Map<String, dynamic>.from(mapToUpdate);
+        updated['isDeleted'] = true;
+        await box.put(keyToUpdate, updated);
+        return;
+      }
+    }
+
+    // Insert new notification
+    await box.add({
+      'id': id,
+      'sender': sender,
+      'message': message,
+      'isDeleted': isDeleted,
+      'packageName': packageName,
+      'timestamp': timestamp,
+      'type': 'text',
+    });
   }
 
   Future<void> _checkNotificationPermission() async {
@@ -47,6 +117,80 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
     }
   }
 
+  Future<void> _syncArchivedNotifications({bool showToast = false}) async {
+    if (_isSyncing) return;
+    setState(() => _isSyncing = true);
+
+    try {
+      final List<dynamic>? rawList =
+          await _channel.invokeMethod<List<dynamic>>('getArchivedNotifications');
+
+      if (rawList != null && rawList.isNotEmpty) {
+        final box = HiveStorageService.deletedMessages;
+        final existingEntries = box.toMap();
+
+        for (var raw in rawList) {
+          if (raw is Map) {
+            final id = raw['id']?.toString() ?? '';
+            final sender = raw['sender']?.toString() ?? '';
+            final message = raw['message']?.toString() ?? '';
+            final isDeleted = raw['isDeleted'] == true;
+            final timestamp = raw['timestamp']?.toString() ?? '';
+            final packageName = raw['packageName']?.toString() ?? 'com.whatsapp';
+            final type = raw['type']?.toString() ?? 'text';
+
+            dynamic matchingKey;
+            Map? existingMap;
+
+            for (var entry in existingEntries.entries) {
+              if (entry.value is Map) {
+                final m = entry.value as Map;
+                if ((id.isNotEmpty && m['id'] == id) ||
+                    (m['sender'] == sender && m['timestamp'] == timestamp)) {
+                  matchingKey = entry.key;
+                  existingMap = m;
+                  break;
+                }
+              }
+            }
+
+            if (matchingKey != null && existingMap != null) {
+              if (isDeleted && existingMap['isDeleted'] != true) {
+                final updated = Map<String, dynamic>.from(existingMap);
+                updated['isDeleted'] = true;
+                await box.put(matchingKey, updated);
+              }
+            } else {
+              await box.add({
+                'id': id,
+                'sender': sender,
+                'message': message,
+                'isDeleted': isDeleted,
+                'packageName': packageName,
+                'timestamp': timestamp,
+                'type': type,
+              });
+            }
+          }
+        }
+      }
+
+      if (showToast && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Notifications synced successfully'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) {
+        setState(() => _isSyncing = false);
+      }
+    }
+  }
+
   void _addTestNotification() async {
     final now = DateTime.now().toIso8601String();
     final sample = {
@@ -63,6 +207,36 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Test notification recorded with [Deleted] indicator!')),
       );
+    }
+  }
+
+  Future<void> _clearAllNotifications() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear All Recovered Messages?'),
+        content: const Text('This will delete all saved messages and logs permanently.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Clear All'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await HiveStorageService.deletedMessages.clear();
+      try {
+        await _channel.invokeMethod('clearArchivedNotifications');
+      } catch (_) {}
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('All recovered messages cleared')),
+        );
+      }
     }
   }
 
@@ -98,10 +272,11 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
           ],
         ),
         content: const Text(
-          'Chatflow recovers messages by monitoring incoming notifications when Notification Access is enabled.\n\n'
-          '• Encrypted chats are not cracked.\n'
-          '• Messages sent while phone was offline, muted chats, or messages received before installing the app cannot be recovered.\n'
-          '• When WhatsApp notifies "This message was deleted", Chatflow preserves the last captured notification preview.',
+          'Chatflow automatically recovers WhatsApp messages by monitoring incoming notifications in the background.\n\n'
+          '• Make sure Notification Access is enabled for Chatflow.\n'
+          '• When someone sends a message, Chatflow captures and securely saves the notification text.\n'
+          '• When the sender clicks "Delete for Everyone", WhatsApp updates the notification to "This message was deleted" - and Chatflow marks the previous message as [DELETED] while keeping the original text visible for you!\n\n'
+          'Note: Messages sent when your phone was turned off or chats that were muted without notifications cannot be recovered.',
         ),
         actions: [
           ElevatedButton(
@@ -115,22 +290,57 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Deleted Messages'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.info_outline),
-            tooltip: 'Disclaimer & How it Works',
-            onPressed: _showDisclaimer,
+            icon: _isSyncing
+                ? SizedBox(
+                    width: 18.w,
+                    height: 18.w,
+                    child: const CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
+            tooltip: 'Sync Notifications',
+            onPressed: () => _syncArchivedNotifications(showToast: true),
           ),
           IconButton(
-            icon: const Icon(Icons.playlist_add),
-            tooltip: 'Add Test Notification',
-            onPressed: _addTestNotification,
+            icon: const Icon(Icons.info_outline),
+            tooltip: 'How it Works',
+            onPressed: _showDisclaimer,
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (val) {
+              if (val == 'test') {
+                _addTestNotification();
+              } else if (val == 'clear') {
+                _clearAllNotifications();
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'test',
+                child: Row(
+                  children: [
+                    Icon(Icons.add_comment_outlined, size: 20),
+                    SizedBox(width: 8),
+                    Text('Add Test Message'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'clear',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                    SizedBox(width: 8),
+                    Text('Clear All Messages', style: TextStyle(color: Colors.red)),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -142,9 +352,9 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
               margin: EdgeInsets.all(12.w),
               padding: EdgeInsets.all(14.w),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.12),
+                color: Colors.orange.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(16.r),
-                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -160,7 +370,7 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
                         ),
                         SizedBox(height: 2.h),
                         Text(
-                          'Enable Notification Access to capture incoming WhatsApp notifications.',
+                          'Enable Notification Access for Chatflow to capture WhatsApp messages before they are deleted.',
                           style: TextStyle(fontSize: 11.sp, color: Colors.grey[700]),
                         ),
                       ],
@@ -171,10 +381,11 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.orange,
                       foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 8.h),
+                      padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
                     ),
                     onPressed: _openNotificationSettings,
-                    child: const Text('Enable', style: TextStyle(fontSize: 12)),
+                    child: const Text('Enable', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
@@ -231,9 +442,17 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
                           ),
                           SizedBox(height: 8.h),
                           Text(
-                            'When WhatsApp notifications are received, they will be archived here. Tap the top-right button to test!',
+                            _isNotificationAccessGranted
+                                ? 'Monitoring active! Incoming WhatsApp messages will automatically appear here. When someone deletes a message, it will be marked [DELETED].'
+                                : 'Notification access is off. Tap "Enable" above to start recovering deleted WhatsApp messages.',
                             textAlign: TextAlign.center,
                             style: TextStyle(fontSize: 13.sp, color: Colors.grey),
+                          ),
+                          SizedBox(height: 16.h),
+                          OutlinedButton.icon(
+                            onPressed: _addTestNotification,
+                            icon: const Icon(Icons.add_comment_outlined),
+                            label: const Text('Add Test Message'),
                           ),
                         ],
                       ),
@@ -270,7 +489,7 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
                 return ListView.separated(
                   padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
                   itemCount: senders.length,
-                  separatorBuilder: (_, __) => SizedBox(height: 8.h),
+                  separatorBuilder: (context, index) => SizedBox(height: 8.h),
                   itemBuilder: (context, index) {
                     final sender = senders[index];
                     final chatMessages = grouped[sender]!;
@@ -284,7 +503,7 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
                       child: ListTile(
                         onTap: () => _openChatDetail(sender, chatMessages),
                         leading: CircleAvatar(
-                          backgroundColor: isBiz ? Colors.teal.withOpacity(0.15) : Colors.green.withOpacity(0.15),
+                          backgroundColor: isBiz ? Colors.teal.withValues(alpha: 0.15) : Colors.green.withValues(alpha: 0.15),
                           child: Text(
                             sender.isNotEmpty ? sender[0].toUpperCase() : '?',
                             style: TextStyle(
@@ -302,7 +521,7 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
                               Container(
                                 padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
                                 decoration: BoxDecoration(
-                                  color: Colors.teal.withOpacity(0.1),
+                                  color: Colors.teal.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(6.r),
                                 ),
                                 child: Text('Business', style: TextStyle(fontSize: 10.sp, color: Colors.teal)),
@@ -328,7 +547,7 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
                               Container(
                                 padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
                                 decoration: BoxDecoration(
-                                  color: Colors.red.withOpacity(0.12),
+                                  color: Colors.red.withValues(alpha: 0.12),
                                   borderRadius: BorderRadius.circular(12.r),
                                 ),
                                 child: Row(
@@ -394,9 +613,11 @@ class _ChatDetailScreen extends StatelessWidget {
       });
     } catch (e) {
       Clipboard.setData(ClipboardData(text: buffer.toString()));
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Chat copied to clipboard!')),
-      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Chat copied to clipboard!')),
+        );
+      }
     }
   }
 
@@ -463,7 +684,7 @@ class _ChatDetailScreen extends StatelessWidget {
         ),
         child: ListView.builder(
           padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
-          reverse: true, // chronological WhatsApp chat style
+          reverse: true,
           itemCount: messages.length,
           itemBuilder: (context, index) {
             final m = messages[index];
@@ -486,7 +707,7 @@ class _ChatDetailScreen extends StatelessWidget {
                     bottomRight: Radius.circular(16.r),
                   ),
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 4, offset: const Offset(0, 2)),
+                    BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 4, offset: const Offset(0, 2)),
                   ],
                 ),
                 child: Column(
@@ -499,7 +720,7 @@ class _ChatDetailScreen extends StatelessWidget {
                           const Icon(Icons.block, size: 12, color: Colors.redAccent),
                           SizedBox(width: 4.w),
                           Text(
-                            'Deleted / Cancelled Notification',
+                            'Deleted / Cancelled Message',
                             style: TextStyle(
                               fontSize: 10.sp,
                               fontWeight: FontWeight.bold,
