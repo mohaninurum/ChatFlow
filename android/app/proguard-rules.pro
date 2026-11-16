@@ -16,11 +16,5 @@
 # Firebase Component Registrars used by ML Kit for runtime dependency injection
 -keep class * implements com.google.firebase.components.ComponentRegistrar { *; }
 
-# Flutter Embedder
--keep class io.flutter.app.** { *; }
--keep class io.flutter.plugin.** { *; }
--keep class io.flutter.util.** { *; }
--keep class io.flutter.view.** { *; }
--keep class io.flutter.** { *; }
--keep class io.flutter.embedding.** { *; }
-
+# Suppress missing Play Core warnings caused by Flutter engine's optional deferred components
+-dontwarn com.google.android.play.core.**
