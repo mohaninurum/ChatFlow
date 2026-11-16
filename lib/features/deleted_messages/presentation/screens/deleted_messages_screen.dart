@@ -5,95 +5,6 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../../../core/storage/hive_storage_service.dart';
 
-/// WhatsApp Chat Export Parser
-class WhatsAppChatParser {
-  // Regex for Standard WhatsApp formats:
-  // e.g. "15/02/24, 10:30 am - Rahul: Hey how are you?"
-  // e.g. "15/02/2024, 10:30 - Rahul: Message"
-  // e.g. "[15/02/24, 10:30:15] Rahul: Message"
-  static final RegExp _headerRegex = RegExp(
-    r'^(?:\[?(\d{1,4}[/\.-]\d{1,2}[/\.-]\d{2,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AaPp][Mm])?)\]?)\s*(?:[-–—]\s*)?([^:]+):\s*(.*)$',
-  );
-
-  static final RegExp _systemMessageRegex = RegExp(
-    r'^(?:\[?(\d{1,4}[/\.-]\d{1,2}[/\.-]\d{2,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AaPp][Mm])?)\]?)\s*(?:[-–—]\s*)?(.*)$',
-  );
-
-  static bool isDeletedText(String text) {
-    final lower = text.toLowerCase().trim();
-    return lower.contains('this message was deleted') ||
-        lower.contains('you deleted this message') ||
-        lower.contains('यह संदेश हटा दिया गया') ||
-        lower.contains('इस मैसेज को हटा दिया गया') ||
-        lower.contains('message was deleted') ||
-        lower.contains('message was revoked') ||
-        lower.contains('deleted this message');
-  }
-
-  static List<Map<String, dynamic>> parseChat(String rawText, {String? defaultSender}) {
-    final List<Map<String, dynamic>> parsedMessages = [];
-    final lines = rawText.split('\n');
-
-    Map<String, dynamic>? currentMessage;
-
-    for (int i = 0; i < lines.length; i++) {
-      final line = lines[i].trimRight();
-      if (line.trim().isEmpty) continue;
-
-      final match = _headerRegex.firstMatch(line);
-      if (match != null) {
-        if (currentMessage != null) {
-          parsedMessages.add(currentMessage);
-        }
-
-        final date = match.group(1)?.trim() ?? '';
-        final time = match.group(2)?.trim() ?? '';
-        final sender = match.group(3)?.trim() ?? defaultSender ?? 'Unknown Contact';
-        final content = match.group(4)?.trim() ?? '';
-
-        final isDeleted = isDeletedText(content);
-
-        currentMessage = {
-          'id': '${DateTime.now().millisecondsSinceEpoch}_$i',
-          'sender': sender,
-          'message': content,
-          'isDeleted': isDeleted,
-          'packageName': 'com.whatsapp',
-          'timestamp': '$date $time',
-          'type': 'text',
-        };
-      } else {
-        // Check if system message
-        final sysMatch = _systemMessageRegex.firstMatch(line);
-        if (sysMatch != null && sysMatch.groupCount >= 3) {
-          final sysText = sysMatch.group(3)?.trim() ?? '';
-          if (sysText.contains('end-to-end encrypted') ||
-              sysText.contains('created group') ||
-              sysText.contains('added') ||
-              sysText.contains('changed the subject')) {
-            // Skip pure WhatsApp encryption/admin banners
-            continue;
-          }
-        }
-
-        // Multi-line message continuation
-        if (currentMessage != null) {
-          currentMessage['message'] = '${currentMessage['message']}\n$line';
-          if (!currentMessage['isDeleted'] && isDeletedText(currentMessage['message'])) {
-            currentMessage['isDeleted'] = true;
-          }
-        }
-      }
-    }
-
-    if (currentMessage != null) {
-      parsedMessages.add(currentMessage);
-    }
-
-    return parsedMessages;
-  }
-}
-
 class DeletedMessagesScreen extends ConsumerStatefulWidget {
   const DeletedMessagesScreen({super.key});
 
@@ -101,253 +12,270 @@ class DeletedMessagesScreen extends ConsumerStatefulWidget {
   ConsumerState<DeletedMessagesScreen> createState() => _DeletedMessagesScreenState();
 }
 
-class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
+class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen>
+    with WidgetsBindingObserver {
   static const _channel = MethodChannel('com.chatflow.app/channel');
-  bool _isLoading = false;
+  bool _isNotificationAccessGranted = false;
+  bool _isSyncing = false;
   String _searchQuery = '';
   String _activeFilter = 'All'; // 'All', 'Deleted Only', 'WA Business'
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _channel.setMethodCallHandler(_handleNativeMethod);
+    _initFlow();
   }
 
-  Future<void> _importChatFromFile() async {
-    setState(() => _isLoading = true);
-    try {
-      final String? fileContent = await _channel.invokeMethod<String>('pickChatFile');
-      if (fileContent != null && fileContent.isNotEmpty) {
-        await _processAndSaveChatText(fileContent, source: 'File Import');
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _initFlow();
+    }
+  }
+
+  Future<void> _initFlow() async {
+    await _checkNotificationPermission();
+    if (_isNotificationAccessGranted) {
+      await _syncArchivedNotifications();
+    }
+  }
+
+  Future<dynamic> _handleNativeMethod(MethodCall call) async {
+    if (call.method == 'onNotificationReceived') {
+      final data = call.arguments;
+      if (data is Map) {
+        await _processIncomingNotification(data);
       }
+    }
+  }
+
+  Future<void> _processIncomingNotification(Map data) async {
+    final box = HiveStorageService.deletedMessages;
+    final id = data['id']?.toString() ?? '';
+    final sender = data['sender']?.toString() ?? 'WhatsApp User';
+    final message = data['message']?.toString() ?? '';
+    final isDeleted = data['isDeleted'] == true;
+    final timestamp = data['timestamp']?.toString() ?? DateTime.now().toIso8601String();
+    final packageName = data['packageName']?.toString() ?? 'com.whatsapp';
+
+    if (isDeleted && sender.isNotEmpty) {
+      // Find the most recent message from this sender to mark as deleted
+      dynamic keyToUpdate;
+      Map? mapToUpdate;
+      for (var entry in box.toMap().entries) {
+        if (entry.value is Map &&
+            entry.value['sender'] == sender &&
+            entry.value['isDeleted'] != true) {
+          keyToUpdate = entry.key;
+          mapToUpdate = entry.value as Map;
+        }
+      }
+
+      if (keyToUpdate != null && mapToUpdate != null) {
+        final updated = Map<String, dynamic>.from(mapToUpdate);
+        updated['isDeleted'] = true;
+        await box.put(keyToUpdate, updated);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.red[700],
+              content: Text('⚡ Deleted message detected from $sender! Original text preserved.'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    // Insert new notification
+    await box.add({
+      'id': id.isNotEmpty ? id : DateTime.now().millisecondsSinceEpoch.toString(),
+      'sender': sender,
+      'message': message,
+      'isDeleted': isDeleted,
+      'packageName': packageName,
+      'timestamp': timestamp,
+      'type': 'text',
+    });
+  }
+
+  Future<void> _checkNotificationPermission() async {
+    try {
+      final bool granted = await _channel.invokeMethod('isNotificationAccessGranted') ?? false;
+      if (mounted) {
+        setState(() => _isNotificationAccessGranted = granted);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isNotificationAccessGranted = false);
+    }
+  }
+
+  Future<void> _openNotificationSettings() async {
+    try {
+      await _channel.invokeMethod('openNotificationSettings');
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Import failed: $e')),
+          SnackBar(content: Text('Could not open notification settings: $e')),
         );
       }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _showPasteChatDialog() async {
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.paste_rounded, color: Colors.green),
-            SizedBox(width: 8),
-            Text('Paste Chat Text'),
-          ],
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Copy exported chat text from WhatsApp and paste it below:',
-                style: TextStyle(fontSize: 12.sp, color: Colors.grey[700]),
-              ),
-              SizedBox(height: 10.h),
-              TextField(
-                controller: controller,
-                maxLines: 8,
-                decoration: InputDecoration(
-                  hintText: 'e.g. 15/02/24, 10:30 am - Rahul: Hey!\n15/02/24, 10:31 am - Rahul: This message was deleted',
-                  hintStyle: TextStyle(fontSize: 12.sp, color: Colors.grey[400]),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.r)),
-                  filled: true,
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, null),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () {
-              final text = controller.text.trim();
-              if (text.isNotEmpty) {
-                Navigator.pop(ctx, text);
-              }
-            },
-            child: const Text('Analyze Chat'),
-          ),
-        ],
-      ),
-    );
-
-    if (result != null && result.isNotEmpty) {
-      setState(() => _isLoading = true);
-      try {
-        await _processAndSaveChatText(result, source: 'Pasted Text');
-      } finally {
-        if (mounted) setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  Future<void> _processAndSaveChatText(String rawText, {required String source}) async {
-    final parsed = WhatsAppChatParser.parseChat(rawText);
-    if (parsed.isEmpty) {
+  Future<void> _openAppDetailsSettings() async {
+    try {
+      await _channel.invokeMethod('openAppDetailsSettings');
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No messages could be parsed. Ensure the text is in standard WhatsApp export format.'),
-          ),
+          SnackBar(content: Text('Could not open App Info settings: $e')),
         );
       }
-      return;
-    }
-
-    final box = HiveStorageService.deletedMessages;
-    int deletedCount = 0;
-    for (final msg in parsed) {
-      if (msg['isDeleted'] == true) deletedCount++;
-      await box.add(msg);
-    }
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: Colors.green[800],
-          content: Text(
-            'Successfully loaded ${parsed.length} messages from $source ($deletedCount deleted found)!',
-          ),
-        ),
-      );
     }
   }
 
-  Future<void> _loadSampleDemoChat() async {
-    final box = HiveStorageService.deletedMessages;
-    final now = DateTime.now();
+  Future<void> _syncArchivedNotifications({bool showToast = false}) async {
+    if (_isSyncing) return;
+    setState(() => _isSyncing = true);
 
-    final sampleItems = [
-      {
-        'id': '${now.millisecondsSinceEpoch}_1',
-        'sender': 'Rahul Sharma',
-        'message': 'Hey bro! Are you coming to the reunion party tonight?',
-        'isDeleted': false,
-        'packageName': 'com.whatsapp',
-        'timestamp': 'Today, 10:15 AM',
-        'type': 'text',
-      },
-      {
-        'id': '${now.millisecondsSinceEpoch}_2',
-        'sender': 'Rahul Sharma',
-        'message': 'Yes I am leaving in 10 minutes! Got everything ready.',
-        'isDeleted': false,
-        'packageName': 'com.whatsapp',
-        'timestamp': 'Today, 10:16 AM',
-        'type': 'text',
-      },
-      {
-        'id': '${now.millisecondsSinceEpoch}_3',
-        'sender': 'Rahul Sharma',
-        'message': 'This message was deleted',
-        'isDeleted': true,
-        'packageName': 'com.whatsapp',
-        'timestamp': 'Today, 10:18 AM',
-        'type': 'text',
-      },
-      {
-        'id': '${now.millisecondsSinceEpoch}_4',
-        'sender': 'Rahul Sharma',
-        'message': 'Wait, did you delete that secret location message? 😂',
-        'isDeleted': false,
-        'packageName': 'com.whatsapp',
-        'timestamp': 'Today, 10:19 AM',
-        'type': 'text',
-      },
-      {
-        'id': '${now.millisecondsSinceEpoch}_5',
-        'sender': 'Rahul Sharma',
-        'message': 'This message was deleted',
-        'isDeleted': true,
-        'packageName': 'com.whatsapp',
-        'timestamp': 'Today, 10:20 AM',
-        'type': 'text',
-      },
-      {
-        'id': '${now.millisecondsSinceEpoch}_6',
-        'sender': 'Rahul Sharma',
-        'message': 'Haha yes, let us meet at Central Park café at 4 PM instead!',
-        'isDeleted': false,
-        'packageName': 'com.whatsapp',
-        'timestamp': 'Today, 10:21 AM',
-        'type': 'text',
-      },
-      // Business contact
-      {
-        'id': '${now.millisecondsSinceEpoch}_7',
-        'sender': 'Neha Patel (Support)',
-        'message': 'Hello! Your package has been dispatched via BlueDart.',
-        'isDeleted': false,
-        'packageName': 'com.whatsapp.w4b',
-        'timestamp': 'Today, 09:00 AM',
-        'type': 'text',
-      },
-      {
-        'id': '${now.millisecondsSinceEpoch}_8',
-        'sender': 'Neha Patel (Support)',
-        'message': 'Tracking ID: BD-89234190',
-        'isDeleted': false,
-        'packageName': 'com.whatsapp.w4b',
-        'timestamp': 'Today, 09:01 AM',
-        'type': 'text',
-      },
-      {
-        'id': '${now.millisecondsSinceEpoch}_9',
-        'sender': 'Neha Patel (Support)',
-        'message': 'This message was deleted',
-        'isDeleted': true,
-        'packageName': 'com.whatsapp.w4b',
-        'timestamp': 'Today, 09:05 AM',
-        'type': 'text',
-      },
-      {
-        'id': '${now.millisecondsSinceEpoch}_10',
-        'sender': 'Neha Patel (Support)',
-        'message': 'Correct tracking ID: BD-89234999. Delivery expected tomorrow by 5 PM.',
-        'isDeleted': false,
-        'packageName': 'com.whatsapp.w4b',
-        'timestamp': 'Today, 09:06 AM',
-        'type': 'text',
-      },
-    ];
+    try {
+      final List<dynamic>? rawList =
+          await _channel.invokeMethod<List<dynamic>>('getArchivedNotifications');
 
-    for (var item in sampleItems) {
-      await box.add(item);
+      if (rawList != null && rawList.isNotEmpty) {
+        final box = HiveStorageService.deletedMessages;
+        final existingEntries = box.toMap();
+
+        for (var raw in rawList) {
+          if (raw is Map) {
+            final id = raw['id']?.toString() ?? '';
+            final sender = raw['sender']?.toString() ?? '';
+            final message = raw['message']?.toString() ?? '';
+            final isDeleted = raw['isDeleted'] == true;
+            final timestamp = raw['timestamp']?.toString() ?? '';
+            final packageName = raw['packageName']?.toString() ?? 'com.whatsapp';
+            final type = raw['type']?.toString() ?? 'text';
+
+            dynamic matchingKey;
+            Map? existingMap;
+
+            for (var entry in existingEntries.entries) {
+              if (entry.value is Map) {
+                final m = entry.value as Map;
+                if ((id.isNotEmpty && m['id'] == id) ||
+                    (m['sender'] == sender && m['timestamp'] == timestamp)) {
+                  matchingKey = entry.key;
+                  existingMap = m;
+                  break;
+                }
+              }
+            }
+
+            if (matchingKey != null && existingMap != null) {
+              if (isDeleted && existingMap['isDeleted'] != true) {
+                final updated = Map<String, dynamic>.from(existingMap);
+                updated['isDeleted'] = true;
+                await box.put(matchingKey, updated);
+              }
+            } else {
+              await box.add({
+                'id': id,
+                'sender': sender,
+                'message': message,
+                'isDeleted': isDeleted,
+                'packageName': packageName,
+                'timestamp': timestamp,
+                'type': type,
+              });
+            }
+          }
+        }
+      }
+
+      if (showToast && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Notifications synchronized successfully'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) {
+        setState(() => _isSyncing = false);
+      }
     }
+  }
+
+  void _simulateDeletedMessage() async {
+    final now = DateTime.now();
+    final box = HiveStorageService.deletedMessages;
+
+    // Add a normal message first
+    await box.add({
+      'id': '${now.millisecondsSinceEpoch}_1',
+      'sender': 'Alex Johnson',
+      'message': 'Hey, meet me at the café at 4 PM! Don\'t tell anyone else.',
+      'isDeleted': false,
+      'packageName': 'com.whatsapp',
+      'timestamp': 'Just now',
+      'type': 'text',
+    });
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Sample demo chat loaded with deleted messages!'),
+          content: Text('Incoming WhatsApp message received from Alex Johnson!'),
           duration: Duration(seconds: 2),
         ),
       );
     }
+
+    // After 1.5 seconds, simulate sender deleting it ("Delete for Everyone")
+    Future.delayed(const Duration(milliseconds: 1500), () async {
+      final entries = box.toMap();
+      for (var entry in entries.entries) {
+        if (entry.value is Map &&
+            entry.value['sender'] == 'Alex Johnson' &&
+            entry.value['isDeleted'] != true) {
+          final updated = Map<String, dynamic>.from(entry.value as Map);
+          updated['isDeleted'] = true;
+          await box.put(entry.key, updated);
+          break;
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.red[800],
+            content: const Text(
+              '⚡ Alex Johnson clicked "Delete for Everyone"! Chatflow captured & preserved the deleted message!',
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    });
   }
 
   Future<void> _clearAllMessages() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Clear All Messages?'),
-        content: const Text('This will delete all saved chats and message history from Chatflow.'),
+        title: const Text('Clear All Recovered Messages?'),
+        content: const Text('This will delete all saved messages and logs permanently from Chatflow.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           ElevatedButton(
@@ -361,9 +289,12 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
 
     if (confirmed == true) {
       await HiveStorageService.deletedMessages.clear();
+      try {
+        await _channel.invokeMethod('clearArchivedNotifications');
+      } catch (_) {}
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('All chat records cleared')),
+          const SnackBar(content: Text('All messages cleared')),
         );
       }
     }
@@ -373,7 +304,7 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
     final Map<String, List<Map>> grouped = {};
     for (var item in items) {
       if (item is Map) {
-        final sender = item['sender']?.toString() ?? 'Unknown Sender';
+        final sender = item['sender']?.toString() ?? 'WhatsApp User';
         grouped.putIfAbsent(sender, () => []).add(item);
       }
     }
@@ -388,44 +319,62 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
     );
   }
 
-  void _showHowItWorks() {
+  void _showAndroid16HelpDialog() {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.r)),
         title: const Row(
           children: [
-            Icon(Icons.verified_user_rounded, color: Colors.green),
+            Icon(Icons.shield_outlined, color: Colors.green),
             SizedBox(width: 8),
-            Text('Android 16 Safe Mode'),
+            Text('Android 16 Setup Guide'),
           ],
         ),
-        content: const SingleChildScrollView(
+        content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '100% Google Play Protect & Android 16 Compliant\n',
-                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green),
+                'How Automatic Deleted Message Recovery Works:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp),
+              ),
+              SizedBox(height: 6.h),
+              Text(
+                'Chatflow runs a local background notification listener. Whenever someone sends a message, it is recorded. If they delete it ("Delete for everyone"), Chatflow detects the deletion notice and highlights the original message for you!\n',
+                style: TextStyle(fontSize: 12.sp, color: Colors.grey[700]),
               ),
               Text(
-                'On Android 16, background notification listeners are restricted and trigger security blocks.\n\n'
-                'Chatflow uses an alternate, 100% safe & private chat analyzer that requires ZERO sensitive permissions:\n\n'
-                '1. Open any WhatsApp or WA Business conversation.\n'
-                '2. Tap three dots (⋮) > More > Export Chat.\n'
-                '3. Choose "Without Media" and save or share the .txt file.\n'
-                '4. In Chatflow, tap "Import Chat (.txt)" or "Paste Chat Text".\n\n'
-                'Chatflow instantly parses the conversation, highlights all deleted messages with red alerts, and lets you read and search them safely.',
+                'If Android shows "Restricted Setting":',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp, color: Colors.orange[800]),
+              ),
+              SizedBox(height: 6.h),
+              Text(
+                '1. Open Phone Settings > Apps > Chatflow (or tap Step 1 button below)\n'
+                '2. In the top-right corner, tap the 3 dots (⋮)\n'
+                '3. Tap "Allow restricted settings" and enter your device PIN or fingerprint\n'
+                '4. Return here and tap "Step 2: Enable Notification Access" to turn the switch ON!',
+                style: TextStyle(fontSize: 12.sp, color: Colors.grey[800], height: 1.4),
               ),
             ],
           ),
         ),
         actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _openAppDetailsSettings();
+            },
+            child: const Text('Open App Info (Step 1)'),
+          ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Got It'),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _openNotificationSettings();
+            },
+            child: const Text('Open Notification Access (Step 2)'),
           ),
         ],
       ),
@@ -439,51 +388,62 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
         title: const Text('Deleted Messages'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.info_outline),
-            tooltip: 'How Safe Mode Works',
-            onPressed: _showHowItWorks,
+            icon: _isSyncing
+                ? SizedBox(
+                    width: 18.w,
+                    height: 18.w,
+                    child: const CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
+            tooltip: 'Sync Messages',
+            onPressed: () => _syncArchivedNotifications(showToast: true),
+          ),
+          IconButton(
+            icon: const Icon(Icons.help_outline),
+            tooltip: 'Android 16 Setup Guide',
+            onPressed: _showAndroid16HelpDialog,
           ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             onSelected: (val) {
-              if (val == 'import') {
-                _importChatFromFile();
-              } else if (val == 'paste') {
-                _showPasteChatDialog();
-              } else if (val == 'demo') {
-                _loadSampleDemoChat();
+              if (val == 'simulate') {
+                _simulateDeletedMessage();
+              } else if (val == 'settings') {
+                _openNotificationSettings();
+              } else if (val == 'app_info') {
+                _openAppDetailsSettings();
               } else if (val == 'clear') {
                 _clearAllMessages();
               }
             },
             itemBuilder: (context) => [
               const PopupMenuItem(
-                value: 'import',
+                value: 'simulate',
                 child: Row(
                   children: [
-                    Icon(Icons.file_open_outlined, size: 20, color: Colors.green),
+                    Icon(Icons.play_circle_outline, size: 20, color: Colors.green),
                     SizedBox(width: 8),
-                    Text('Import Chat (.txt)'),
+                    Text('Simulate Deleted Message'),
                   ],
                 ),
               ),
               const PopupMenuItem(
-                value: 'paste',
+                value: 'settings',
                 child: Row(
                   children: [
-                    Icon(Icons.paste_rounded, size: 20, color: Colors.blue),
+                    Icon(Icons.notifications_active_outlined, size: 20),
                     SizedBox(width: 8),
-                    Text('Paste Chat Text'),
+                    Text('Notification Settings'),
                   ],
                 ),
               ),
               const PopupMenuItem(
-                value: 'demo',
+                value: 'app_info',
                 child: Row(
                   children: [
-                    Icon(Icons.bolt_rounded, size: 20, color: Colors.amber),
+                    Icon(Icons.settings_outlined, size: 20),
                     SizedBox(width: 8),
-                    Text('Load Demo Chat'),
+                    Text('App Info (Allow 3-Dots)'),
                   ],
                 ),
               ),
@@ -504,89 +464,128 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
       ),
       body: Column(
         children: [
-          // Safe Mode Banner
-          Container(
-            margin: EdgeInsets.all(12.w),
-            padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 12.h),
-            decoration: BoxDecoration(
-              color: Colors.green.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(16.r),
-              border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.shield_outlined, color: Colors.green, size: 28),
-                SizedBox(width: 12.w),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+          // Dynamic Status Banner (Automatic Active vs Setup Needed)
+          if (_isNotificationAccessGranted)
+            Container(
+              margin: EdgeInsets.all(12.w),
+              padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 12.h),
+              decoration: BoxDecoration(
+                color: Colors.green.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16.r),
+                border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: Colors.green, size: 28),
+                  SizedBox(width: 12.w),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Text(
+                              'Automatic Live Recovery Active',
+                              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green),
+                            ),
+                            SizedBox(width: 6.w),
+                            Container(
+                              padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                borderRadius: BorderRadius.circular(6.r),
+                              ),
+                              child: Text(
+                                'REAL-TIME',
+                                style: TextStyle(color: Colors.white, fontSize: 9.sp, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 2.h),
+                        Text(
+                          'Background listener is active. Deleted messages are captured automatically with zero manual upload!',
+                          style: TextStyle(fontSize: 11.sp, color: Colors.grey[700]),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            Container(
+              margin: EdgeInsets.all(12.w),
+              padding: EdgeInsets.all(14.w),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(16.r),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.35)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      Row(
-                        children: [
-                          const Text(
-                            'Android 16 Safe Mode',
-                            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green),
-                          ),
-                          SizedBox(width: 6.w),
-                          Container(
-                            padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
-                            decoration: BoxDecoration(
-                              color: Colors.green,
-                              borderRadius: BorderRadius.circular(6.r),
-                            ),
-                            child: Text(
-                              'VERIFIED',
-                              style: TextStyle(color: Colors.white, fontSize: 9.sp, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ],
+                      const Icon(Icons.bolt_rounded, color: Colors.orange, size: 26),
+                      SizedBox(width: 8.w),
+                      const Expanded(
+                        child: Text(
+                          'Enable Automatic Deleted Messages',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
                       ),
-                      SizedBox(height: 2.h),
-                      Text(
-                        '100% Secure • No sensitive notification listener required • Export & analyze chats safely',
-                        style: TextStyle(fontSize: 11.sp, color: Colors.grey[700]),
+                      IconButton(
+                        icon: const Icon(Icons.info_outline, size: 20, color: Colors.orange),
+                        onPressed: _showAndroid16HelpDialog,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
-          ),
-
-          // Action Buttons Row (Import .txt / Paste Text / Demo)
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 12.w),
-            child: Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(vertical: 10.h),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
-                    ),
-                    onPressed: _isLoading ? null : _importChatFromFile,
-                    icon: _isLoading
-                        ? SizedBox(width: 16.w, height: 16.w, child: const CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.file_open_rounded, size: 18),
-                    label: const Text('Import Chat (.txt)', style: TextStyle(fontWeight: FontWeight.bold)),
+                  SizedBox(height: 4.h),
+                  Text(
+                    'For 100% automatic recovery without manual upload, grant Notification Access. On Android 16, unlock via 2 simple steps:',
+                    style: TextStyle(fontSize: 11.sp, color: Colors.grey[800]),
                   ),
-                ),
-                SizedBox(width: 8.w),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 10.h),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
+                  SizedBox(height: 10.h),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(color: Colors.orange.shade700),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
+                            padding: EdgeInsets.symmetric(vertical: 8.h),
+                          ),
+                          onPressed: _openAppDetailsSettings,
+                          child: Text(
+                            'Step 1: Allow (3-Dots)',
+                            style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 8.w),
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange.shade700,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
+                            padding: EdgeInsets.symmetric(vertical: 8.h),
+                          ),
+                          onPressed: _openNotificationSettings,
+                          child: Text(
+                            'Step 2: Enable Access',
+                            style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  onPressed: _showPasteChatDialog,
-                  icon: const Icon(Icons.paste_rounded, size: 18),
-                  label: const Text('Paste'),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          SizedBox(height: 8.h),
 
           // Search bar
           Padding(
@@ -616,9 +615,9 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
                 _buildFilterChip('WA Business'),
                 const Spacer(),
                 TextButton.icon(
-                  onPressed: _loadSampleDemoChat,
-                  icon: const Icon(Icons.bolt, size: 16, color: Colors.amber),
-                  label: Text('Demo Chat', style: TextStyle(fontSize: 12.sp, color: Colors.amber[800])),
+                  onPressed: _simulateDeletedMessage,
+                  icon: const Icon(Icons.play_circle_fill, size: 16, color: Colors.green),
+                  label: Text('Test Auto Recovery', style: TextStyle(fontSize: 11.sp, color: Colors.green[800])),
                 ),
               ],
             ),
@@ -641,41 +640,27 @@ class _DeletedMessagesScreenState extends ConsumerState<DeletedMessagesScreen> {
                           Icon(Icons.mark_chat_unread_outlined, size: 64.sp, color: Colors.green.withValues(alpha: 0.6)),
                           SizedBox(height: 16.h),
                           const Text(
-                            'No Recovered Chats Yet',
+                            'Waiting For Messages',
                             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                           ),
                           SizedBox(height: 8.h),
                           Text(
-                            'To recover and view deleted messages safely on Android 16:\n\n'
-                            '1. In WhatsApp, tap (⋮) > More > Export Chat > Without Media\n'
-                            '2. Tap "Import Chat (.txt)" below or paste the text',
+                            _isNotificationAccessGranted
+                                ? 'Automatic Live Recovery is active! Whenever someone sends you a WhatsApp message and deletes it, Chatflow will automatically capture and preserve it here.'
+                                : 'Notification access is off. Tap "Step 2: Enable Access" above to start capturing deleted messages automatically in the background.',
                             textAlign: TextAlign.center,
                             style: TextStyle(fontSize: 13.sp, color: Colors.grey[700]),
                           ),
                           SizedBox(height: 20.h),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.green,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
-                                ),
-                                onPressed: _importChatFromFile,
-                                icon: const Icon(Icons.file_open_rounded),
-                                label: const Text('Import Chat (.txt)'),
-                              ),
-                              SizedBox(width: 10.w),
-                              OutlinedButton.icon(
-                                style: OutlinedButton.styleFrom(
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
-                                ),
-                                onPressed: _loadSampleDemoChat,
-                                icon: const Icon(Icons.bolt, color: Colors.amber),
-                                label: const Text('Try Demo Chat'),
-                              ),
-                            ],
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
+                            ),
+                            onPressed: _simulateDeletedMessage,
+                            icon: const Icon(Icons.play_arrow_rounded),
+                            label: const Text('Simulate Test Deleted Message'),
                           ),
                         ],
                       ),
@@ -950,7 +935,7 @@ class _ChatDetailScreenState extends State<_ChatDetailScreen> {
                   final m = displayMessages[index];
                   final text = m['message']?.toString() ?? '';
                   final isDeleted = m['isDeleted'] == true || text.contains('deleted');
-                  final time = m['timestamp']?.toString() ?? '';
+                  final time = m['timestamp']?.toString().split('T').last.split('.').first ?? '';
 
                   return Align(
                     alignment: Alignment.centerLeft,
@@ -989,7 +974,7 @@ class _ChatDetailScreenState extends State<_ChatDetailScreen> {
                                 const Icon(Icons.block, size: 14, color: Colors.redAccent),
                                 SizedBox(width: 4.w),
                                 Text(
-                                  'DELETED MESSAGE DETECTED',
+                                  'DELETED MESSAGE RECOVERED',
                                   style: TextStyle(
                                     fontSize: 10.sp,
                                     fontWeight: FontWeight.bold,

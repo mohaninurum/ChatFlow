@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_listener_service_name">Chatflow Deleted Message Recovery</string>
+    <string name="notification_listener_service_description">Chatflow detects and recovers deleted WhatsApp messages by monitoring message notifications locally on your device.</string>
+</resources>
+

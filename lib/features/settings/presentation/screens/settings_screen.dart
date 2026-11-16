@@ -19,6 +19,7 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   static const _channel = MethodChannel('com.chatflow.app/channel');
   bool _storageGranted = false;
+  bool _notificationGranted = false;
   String _cacheSize = '0 KB';
   String _language = 'English';
   bool _appLockEnabled = false;
@@ -55,9 +56,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       storage = await Permission.photos.isGranted;
     }
 
+    bool notification = false;
+    try {
+      notification = await _channel.invokeMethod('isNotificationAccessGranted') ?? false;
+    } catch (_) {}
+
     if (mounted) {
       setState(() {
         _storageGranted = storage;
+        _notificationGranted = notification;
       });
     }
   }
@@ -272,13 +279,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           // Permissions Section
           const _SectionHeader(title: 'Permissions & System Access'),
           ListTile(
-            leading: const Icon(
-              Icons.verified_user_outlined,
-              color: Colors.green,
+            leading: Icon(
+              _notificationGranted ? Icons.notifications_active_outlined : Icons.notifications_off_outlined,
+              color: _notificationGranted ? Colors.green : Colors.orange,
             ),
-            title: const Text('Android 16 Safe Mode'),
-            subtitle: const Text('Verified secure (Zero restricted permissions required)'),
-            trailing: const Icon(Icons.check_circle, color: Colors.green, size: 18),
+            title: const Text('Automatic Deleted Message Recovery'),
+            subtitle: Text(_notificationGranted
+                ? 'Active (Live background notification listener enabled)'
+                : 'Disabled - Tap to enable Notification Access'),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+            onTap: () async {
+              await _channel.invokeMethod('openNotificationSettings');
+              await _checkPermissions();
+            },
           ),
           ListTile(
             leading: Icon(
