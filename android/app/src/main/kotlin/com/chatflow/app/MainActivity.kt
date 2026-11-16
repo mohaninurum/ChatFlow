@@ -443,7 +443,11 @@ class MainActivity : FlutterActivity() {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                         result.success(Environment.isExternalStorageManager())
                     } else {
-                        result.success(true)
+                        val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                            this,
+                            android.Manifest.permission.READ_EXTERNAL_STORAGE
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        result.success(granted)
                     }
                 }
                 "requestManageStorage" -> {

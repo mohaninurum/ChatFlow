@@ -80,7 +80,7 @@ class StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
       if (mounted) setState(() {});
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      checkAndReload(promptIfDenied: true);
+      _loadStatuses();
     });
   }
 
@@ -114,15 +114,23 @@ class StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     if (!Platform.isAndroid) return true;
     try {
       final bool isManageGranted = await _channel.invokeMethod('isManageStorageGranted') ?? false;
-      if (!isManageGranted) return false;
-      // On Android < 11, isManageStorageGranted returns true by default; verify runtime storage
-      if (await Permission.storage.isDenied) {
-        return false;
-      }
-      return true;
+      if (isManageGranted) return true;
+
+      // Fallback: Check if SAF folder access was granted
+      final bool isSafGranted = await _channel.invokeMethod('isStatusFolderPermissionGranted') ?? false;
+      if (isSafGranted) return true;
+
+      // Check permission_handler permissions (for Android < 11 or legacy devices)
+      if (await Permission.manageExternalStorage.isGranted) return true;
+      if (await Permission.storage.isGranted) return true;
+      if (await Permission.photos.isGranted) return true;
+
+      return false;
     } catch (_) {
       try {
-        return await Permission.manageExternalStorage.isGranted;
+        return await Permission.manageExternalStorage.isGranted ||
+               await Permission.storage.isGranted ||
+               await Permission.photos.isGranted;
       } catch (_) {
         return false;
       }
@@ -244,7 +252,7 @@ class StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     }
   }
 
-  Future<void> checkAndReload({bool promptIfDenied = true}) async {
+  Future<void> checkAndReload({bool promptIfDenied = false}) async {
     await _loadStatuses();
     if (_permissionDenied && promptIfDenied && mounted) {
       _showPermissionDialog();
@@ -794,7 +802,7 @@ class StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
               ),
               SizedBox(height: 12.h),
               TextButton.icon(
-                onPressed: () => checkAndReload(promptIfDenied: true),
+                onPressed: () => checkAndReload(promptIfDenied: false),
                 icon: const Icon(Icons.refresh),
                 label: const Text('Check Again'),
               ),

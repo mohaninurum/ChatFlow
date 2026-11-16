@@ -37,7 +37,7 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell> {
           final wasDifferent = _currentIndex != index;
           setState(() => _currentIndex = index);
           if (index == 1 && wasDifferent) {
-            _statusScreenKey.currentState?.checkAndReload(promptIfDenied: true);
+            _statusScreenKey.currentState?.checkAndReload(promptIfDenied: false);
           }
         },
         backgroundColor: isDark ? const Color(0xFF1E2830) : Colors.white,
