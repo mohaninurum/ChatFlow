@@ -789,7 +789,7 @@ class StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
               ),
               SizedBox(height: 24.h),
               ElevatedButton.icon(
-                onPressed: _requestManageAccess,
+                onPressed: _showPermissionDialog,
                 icon: const Icon(Icons.security_update_good_rounded),
                 label: const Text('Allow Storage & Media Access'),
                 style: ElevatedButton.styleFrom(

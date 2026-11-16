@@ -16,6 +16,7 @@ import java.io.File
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.chatflow.app/channel"
@@ -422,18 +423,44 @@ class MainActivity : FlutterActivity() {
                                 result.error("FILE_NOT_FOUND", "File does not exist: $filePath", null)
                                 return@setMethodCallHandler
                             }
-                            val image = InputImage.fromFilePath(this, Uri.fromFile(file))
-                            val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+
+                            val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                            val image = if (bitmap != null) {
+                                val rotation = try {
+                                    val exif = android.media.ExifInterface(file.absolutePath)
+                                    when (exif.getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL)) {
+                                        android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                                        android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                                        android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                                        else -> 0
+                                    }
+                                } catch (_: Exception) {
+                                    0
+                                }
+                                InputImage.fromBitmap(bitmap, rotation)
+                            } else {
+                                InputImage.fromFilePath(applicationContext, Uri.fromFile(file))
+                            }
+
+                            val recognizer = if (language.contains("Hindi") || language.contains("हिंदी")) {
+                                TextRecognition.getClient(DevanagariTextRecognizerOptions.Builder().build())
+                            } else {
+                                try {
+                                    TextRecognition.getClient(DevanagariTextRecognizerOptions.Builder().build())
+                                } catch (_: Exception) {
+                                    TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                                }
+                            }
 
                             recognizer.process(image)
                                 .addOnSuccessListener { visionText ->
                                     result.success(visionText.text)
                                 }
                                 .addOnFailureListener { e ->
-                                    result.error("OCR_FAILED", e.message, null)
+                                    result.error("OCR_FAILED", e.message ?: "Failed to recognize text", null)
                                 }
                         } catch (e: Exception) {
-                            result.error("OCR_ERROR", e.message, null)
+                            result.error("OCR_ERROR", e.message ?: "Unknown OCR error", null)
                         }
                     } else {
                         result.error("INVALID_PATH", "File path is null", null)

@@ -22,9 +22,10 @@ class _OcrScreenState extends ConsumerState<OcrScreen> {
 
   File? _selectedImage;
   bool _isProcessing = false;
-  String _selectedLanguage = 'English';
+  String _selectedLanguage = 'Auto (Hindi & English)';
 
   final List<String> _languages = [
+    'Auto (Hindi & English)',
     'English',
     'Hindi (हिंदी)',
     'Spanish',

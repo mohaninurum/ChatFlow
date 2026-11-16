@@ -27,9 +27,12 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
@@ -46,7 +49,6 @@ flutter {
 
 dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
-    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
 }
