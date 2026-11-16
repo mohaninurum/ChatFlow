@@ -14,10 +14,10 @@ class StatusSaverScreen extends ConsumerStatefulWidget {
   const StatusSaverScreen({super.key});
 
   @override
-  ConsumerState<StatusSaverScreen> createState() => _StatusSaverScreenState();
+  ConsumerState<StatusSaverScreen> createState() => StatusSaverScreenState();
 }
 
-class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
+class StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   static const _channel = MethodChannel('com.chatflow.app/channel');
   late TabController _tabController;
@@ -28,6 +28,7 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
   final Map<String, Uint8List> _videoThumbnails = {};
   bool _isLoading = true;
   bool _permissionDenied = false;
+  bool _isPermissionDialogShowing = false;
 
   // Multi-select state
   bool _isSelectionMode = false;
@@ -78,7 +79,9 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     _tabController.addListener(() {
       if (mounted) setState(() {});
     });
-    _loadStatuses();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      checkAndReload(promptIfDenied: true);
+    });
   }
 
   @override
@@ -107,15 +110,166 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     } catch (_) {}
   }
 
+  Future<bool> _hasStoragePermission() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      final bool isManageGranted = await _channel.invokeMethod('isManageStorageGranted') ?? false;
+      if (!isManageGranted) return false;
+      // On Android < 11, isManageStorageGranted returns true by default; verify runtime storage
+      if (await Permission.storage.isDenied) {
+        return false;
+      }
+      return true;
+    } catch (_) {
+      try {
+        return await Permission.manageExternalStorage.isGranted;
+      } catch (_) {
+        return false;
+      }
+    }
+  }
+
   Future<void> _requestManageAccess() async {
     try {
-      final res = await _channel.invokeMethod('requestManageStorage');
-      if (res != true) {
-        await openAppSettings();
+      if (Platform.isAndroid) {
+        final res = await _channel.invokeMethod('requestManageStorage');
+        if (res != true) {
+          await [
+            Permission.manageExternalStorage,
+            Permission.storage,
+            Permission.photos,
+            Permission.videos,
+          ].request();
+        }
       }
     } catch (_) {
-      await openAppSettings();
+      try {
+        await [
+          Permission.manageExternalStorage,
+          Permission.storage,
+          Permission.photos,
+          Permission.videos,
+        ].request();
+      } catch (_) {
+        await openAppSettings();
+      }
     }
+  }
+
+  Future<void> _showPermissionDialog() async {
+    if (!mounted || _isPermissionDialogShowing) return;
+    _isPermissionDialogShowing = true;
+
+    try {
+      await showDialog(
+        context: context,
+        barrierDismissible: true,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.r)),
+          title: Row(
+            children: [
+              Container(
+                padding: EdgeInsets.all(8.w),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF25D366).withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.folder_special_rounded, color: Color(0xFF25D366)),
+              ),
+              SizedBox(width: 12.w),
+              const Expanded(
+                child: Text(
+                  'Storage Access Needed',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'WhatsApp status photos aur videos ko automatically scan aur show karne ke liye Storage & Media Access enable karein.',
+                style: TextStyle(fontSize: 14.sp, height: 1.4),
+              ),
+              SizedBox(height: 14.h),
+              Container(
+                padding: EdgeInsets.all(12.w),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF25D366).withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12.r),
+                  border: Border.all(color: const Color(0xFF25D366).withValues(alpha: 0.2)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.bolt_rounded, color: Color(0xFF25D366), size: 20),
+                    SizedBox(width: 8.w),
+                    const Expanded(
+                      child: Text(
+                        '1-Tap Setup: Settings me Chatflow ko Allow karein.',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Not Now', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF25D366),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
+                padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 10.h),
+              ),
+              icon: const Icon(Icons.security_update_good_rounded, size: 18),
+              label: const Text('Allow Access'),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _requestManageAccess();
+              },
+            ),
+          ],
+        ),
+      );
+    } catch (_) {
+    } finally {
+      _isPermissionDialogShowing = false;
+    }
+  }
+
+  Future<void> checkAndReload({bool promptIfDenied = true}) async {
+    await _loadStatuses();
+    if (_permissionDenied && promptIfDenied && mounted) {
+      _showPermissionDialog();
+    }
+  }
+
+  Future<List<File>> _loadSavedDownloadsList() async {
+    final List<File> savedList = [];
+    final Set<String> seenSaved = {};
+    try {
+      final savedDir = Directory(_savedDirectoryPath);
+      if (await savedDir.exists()) {
+        final items = savedDir.listSync();
+        for (var item in items) {
+          if (item is File) {
+            final name = item.path.split('/').last.split('\\').last.toLowerCase();
+            if (seenSaved.add(name)) {
+              savedList.add(item);
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    _sortFiles(savedList);
+    return savedList;
   }
 
   Future<void> _loadStatuses() async {
@@ -128,39 +282,23 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     });
 
     // Check storage permissions
-    bool isGranted = false;
-    if (Platform.isAndroid) {
-      try {
-        isGranted = await _channel.invokeMethod('isManageStorageGranted') ?? false;
-      } catch (_) {
-        isGranted = await Permission.manageExternalStorage.isGranted;
+    final hasPerm = await _hasStoragePermission();
+    if (!hasPerm) {
+      final savedList = await _loadSavedDownloadsList();
+      if (mounted) {
+        setState(() {
+          _photos = [];
+          _videos = [];
+          _savedDownloads = savedList;
+          _isLoading = false;
+          _permissionDenied = true;
+        });
       }
-
-      if (!isGranted) {
-        // Check standard media permissions as well
-        final storage = await Permission.storage.isGranted;
-        final photos = await Permission.photos.isGranted;
-        final videos = await Permission.videos.isGranted;
-        if (storage || photos || videos) {
-          isGranted = true;
-        } else {
-          // Request permissions once
-          await [
-            Permission.storage,
-            Permission.photos,
-            Permission.videos,
-          ].request();
-          
-          try {
-            isGranted = await _channel.invokeMethod('isManageStorageGranted') ?? false;
-          } catch (_) {}
-        }
-      }
+      return;
     }
 
     final List<File> photos = [];
     final List<File> videos = [];
-    final List<File> savedList = [];
     final Set<String> seenStatusKeys = {};
 
     void addStatusIfUnique(File file) {
@@ -175,8 +313,6 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
         }
 
         // Deduplication key: lowercased filename + file size
-        // If two paths point to the same file (e.g. /sdcard/... and /storage/emulated/0/...),
-        // they have the exact same filename and byte length!
         int fileSize = 0;
         try {
           fileSize = file.lengthSync();
@@ -184,7 +320,7 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
 
         final dedupKey = '${name.toLowerCase()}_$fileSize';
         if (!seenStatusKeys.add(dedupKey)) {
-          return; // Duplicate status already added!
+          return; // Duplicate status already added
         }
 
         final ext = name.split('.').last.toLowerCase();
@@ -222,25 +358,10 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
     }
 
     // 3. Scan Chatflow saved directory (Download History)
-    final Set<String> seenSaved = {};
-    try {
-      final savedDir = Directory(_savedDirectoryPath);
-      if (await savedDir.exists()) {
-        final items = savedDir.listSync();
-        for (var item in items) {
-          if (item is File) {
-            final name = item.path.split('/').last.split('\\').last.toLowerCase();
-            if (seenSaved.add(name)) {
-              savedList.add(item);
-            }
-          }
-        }
-      }
-    } catch (_) {}
+    final savedList = await _loadSavedDownloadsList();
 
     _sortFiles(photos);
     _sortFiles(videos);
-    _sortFiles(savedList);
 
     if (mounted) {
       setState(() {
@@ -248,8 +369,7 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
         _videos = videos;
         _savedDownloads = savedList;
         _isLoading = false;
-        // If files are loaded, permissions are working!
-        _permissionDenied = (photos.isEmpty && videos.isEmpty && !isGranted);
+        _permissionDenied = false;
       });
 
       // Prefetch thumbnails for videos in background
@@ -613,67 +733,73 @@ class _StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _permissionDenied
-              ? _buildPermissionPrompt()
-              : TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildMediaGrid(filteredAll, allFiles: filteredAll, isSavedTab: false, tabType: 'all'),
-                    _buildMediaGrid(filteredPhotos, allFiles: filteredAll, isSavedTab: false, tabType: 'photo'),
-                    _buildMediaGrid(filteredVideos, allFiles: filteredAll, isSavedTab: false, tabType: 'video'),
-                    _buildMediaGrid(filteredSaved, allFiles: filteredSaved, isSavedTab: true, tabType: 'saved'),
-                  ],
-                ),
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                _permissionDenied
+                    ? _buildPermissionPrompt()
+                    : _buildMediaGrid(filteredAll, allFiles: filteredAll, isSavedTab: false, tabType: 'all'),
+                _permissionDenied
+                    ? _buildPermissionPrompt()
+                    : _buildMediaGrid(filteredPhotos, allFiles: filteredAll, isSavedTab: false, tabType: 'photo'),
+                _permissionDenied
+                    ? _buildPermissionPrompt()
+                    : _buildMediaGrid(filteredVideos, allFiles: filteredAll, isSavedTab: false, tabType: 'video'),
+                _buildMediaGrid(filteredSaved, allFiles: filteredSaved, isSavedTab: true, tabType: 'saved'),
+              ],
+            ),
     );
   }
 
   Widget _buildPermissionPrompt() {
     return Center(
-      child: Padding(
-        padding: EdgeInsets.all(28.w),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: EdgeInsets.all(20.w),
-              decoration: BoxDecoration(
-                color: Colors.amber.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: EdgeInsets.all(28.w),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: EdgeInsets.all(20.w),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF25D366).withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.folder_special_rounded, size: 54.sp, color: const Color(0xFF25D366)),
               ),
-              child: Icon(Icons.folder_special_rounded, size: 54.sp, color: Colors.amber[800]),
-            ),
-            SizedBox(height: 20.h),
-            Text(
-              'Automatic WhatsApp Status Sync',
-              style: TextStyle(fontSize: 19.sp, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: 10.h),
-            Text(
-              'Allow storage access once so Chatflow can automatically detect and display WhatsApp statuses without asking you to pick folders.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey[600], fontSize: 13.5.sp, height: 1.4),
-            ),
-            SizedBox(height: 24.h),
-            ElevatedButton.icon(
-              onPressed: _requestManageAccess,
-              icon: const Icon(Icons.security_update_good_rounded),
-              label: const Text('Allow Automatic Access'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF25D366),
-                foregroundColor: Colors.white,
-                padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 13.h),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-                elevation: 2,
+              SizedBox(height: 20.h),
+              Text(
+                'WhatsApp Status Access Required',
+                style: TextStyle(fontSize: 19.sp, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
               ),
-            ),
-            SizedBox(height: 12.h),
-            TextButton.icon(
-              onPressed: _loadStatuses,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Check Again'),
-            ),
-          ],
+              SizedBox(height: 10.h),
+              Text(
+                'WhatsApp ke photos aur videos status dekhne ke liye storage access enable karein. Ek tap me direct access mil jayega.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey[600], fontSize: 13.5.sp, height: 1.4),
+              ),
+              SizedBox(height: 24.h),
+              ElevatedButton.icon(
+                onPressed: _requestManageAccess,
+                icon: const Icon(Icons.security_update_good_rounded),
+                label: const Text('Allow Storage & Media Access'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF25D366),
+                  foregroundColor: Colors.white,
+                  padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 13.h),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
+                  elevation: 2,
+                ),
+              ),
+              SizedBox(height: 12.h),
+              TextButton.icon(
+                onPressed: () => checkAndReload(promptIfDenied: true),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Check Again'),
+              ),
+            ],
+          ),
         ),
       ),
     );

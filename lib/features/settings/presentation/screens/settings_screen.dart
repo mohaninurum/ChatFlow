@@ -20,24 +20,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   static const _channel = MethodChannel('com.chatflow.app/channel');
   bool _storageGranted = false;
   String _cacheSize = '0 KB';
-  String _language = 'English';
-  bool _appLockEnabled = false;
 
   @override
   void initState() {
     super.initState();
     _checkPermissions();
     _calculateCache();
-    _loadLocalSettings();
-  }
-
-  void _loadLocalSettings() {
-    final lang = HiveStorageService.settings.get('language', defaultValue: 'English');
-    final lock = HiveStorageService.settings.get('appLockEnabled', defaultValue: false);
-    setState(() {
-      _language = lang;
-      _appLockEnabled = lock;
-    });
   }
 
   Future<void> _checkPermissions() async {
@@ -129,50 +117,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  void _showAppLockDialog() {
-    final pinCtrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.r)),
-        title: const Text('Configure App Lock PIN'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Set a 4-digit PIN to secure your Chatflow app.'),
-            SizedBox(height: 12.h),
-            TextField(
-              controller: pinCtrl,
-              maxLength: 4,
-              obscureText: true,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: '4-Digit PIN', border: OutlineInputBorder()),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () async {
-              final pin = pinCtrl.text.trim();
-              if (pin.length == 4) {
-                await HiveStorageService.settings.put('appLockPin', pin);
-                await HiveStorageService.settings.put('appLockEnabled', true);
-                if (ctx.mounted) Navigator.pop(ctx);
-                if (!mounted) return;
-                setState(() => _appLockEnabled = true);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('App Lock PIN enabled!')),
-                );
-              }
-            },
-            child: const Text('Save PIN'),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _showThemeDialog(ThemeMode current) {
     showDialog(
       context: context,
@@ -208,35 +152,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  void _showLanguageDialog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('Choose Language'),
-        children: [
-          ListTile(
-            title: const Text('English'),
-            trailing: _language == 'English' ? const Icon(Icons.check, color: Colors.green) : null,
-            onTap: () {
-              HiveStorageService.settings.put('language', 'English');
-              setState(() => _language = 'English');
-              Navigator.pop(ctx);
-            },
-          ),
-          ListTile(
-            title: const Text('हिंदी (Hindi)'),
-            trailing: _language == 'हिंदी' ? const Icon(Icons.check, color: Colors.green) : null,
-            onTap: () {
-              HiveStorageService.settings.put('language', 'हिंदी');
-              setState(() => _language = 'हिंदी');
-              Navigator.pop(ctx);
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
@@ -260,13 +175,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             trailing: const Icon(Icons.arrow_forward_ios, size: 14),
             onTap: () => _showThemeDialog(themeMode),
           ),
-          ListTile(
-            leading: const Icon(Icons.language_outlined),
-            title: const Text('Language'),
-            subtitle: Text(_language),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-            onTap: _showLanguageDialog,
-          ),
           const Divider(),
 
           // Permissions Section
@@ -286,24 +194,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 await [Permission.manageExternalStorage, Permission.storage, Permission.photos, Permission.videos].request();
               }
               await _checkPermissions();
-            },
-          ),
-          const Divider(),
-
-          // Security & App Lock
-          const _SectionHeader(title: 'Privacy & Security'),
-          SwitchListTile(
-            secondary: const Icon(Icons.lock_outline),
-            title: const Text('App Lock PIN'),
-            subtitle: Text(_appLockEnabled ? 'App lock is active' : 'Protect Chatflow with a 4-digit PIN'),
-            value: _appLockEnabled,
-            onChanged: (val) {
-              if (val) {
-                _showAppLockDialog();
-              } else {
-                HiveStorageService.settings.put('appLockEnabled', false);
-                setState(() => _appLockEnabled = false);
-              }
             },
           ),
           const Divider(),
@@ -348,7 +238,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               );
               if (confirmed == true) {
                 await HiveStorageService.history.clear();
-                await HiveStorageService.deletedMessages.clear();
                 await HiveStorageService.templates.clear();
                 await HiveStorageService.statusDownloads.clear();
                 await HiveStorageService.init(); // re-seed defaults
@@ -382,8 +271,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   content: const SingleChildScrollView(
                     child: Text(
                       '1. Offline First: Chatflow operates 100% locally on your smartphone. We do not transmit or upload your phone numbers, chats, or media to any remote server.\n\n'
-                      '2. Permissions: Storage permission is used solely to save WhatsApp status media to your device gallery. Notification access is used solely to archive incoming notification snippets locally.\n\n'
-                      '3. Encryption & WhatsApp Terms: Chatflow never modifies WhatsApp binaries, bypasses encryption, or accesses WhatsApp SQLite databases.',
+                      '2. Permissions: Storage permission is used solely to detect and save WhatsApp status photos and videos to your device gallery.\n\n'
+                      '3. Encryption & WhatsApp Terms: Chatflow never modifies WhatsApp binaries, bypasses encryption, or accesses private WhatsApp files.',
                     ),
                   ),
                   actions: [

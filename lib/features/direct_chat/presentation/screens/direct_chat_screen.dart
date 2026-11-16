@@ -8,7 +8,8 @@ import '../../../../core/storage/hive_storage_service.dart';
 import '../../../../core/utils/country_codes.dart';
 
 class DirectChatScreen extends ConsumerStatefulWidget {
-  const DirectChatScreen({super.key});
+  final String? initialMessage;
+  const DirectChatScreen({super.key, this.initialMessage});
 
   @override
   ConsumerState<DirectChatScreen> createState() => _DirectChatScreenState();
@@ -24,6 +25,9 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialMessage != null && widget.initialMessage!.isNotEmpty) {
+      _messageController.text = widget.initialMessage!;
+    }
     _phoneController.addListener(_validatePhone);
     _messageController.addListener(() => setState(() {}));
   }

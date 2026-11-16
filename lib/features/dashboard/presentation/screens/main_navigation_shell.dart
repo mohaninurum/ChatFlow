@@ -14,13 +14,7 @@ class MainNavigationShell extends ConsumerStatefulWidget {
 
 class _MainNavigationShellState extends ConsumerState<MainNavigationShell> {
   int _currentIndex = 0;
-
-  final List<Widget> _screens = const [
-    HomeScreen(),
-    StatusSaverScreen(),
-    ToolsScreen(),
-    SettingsScreen(),
-  ];
+  final GlobalKey<StatusSaverScreenState> _statusScreenKey = GlobalKey<StatusSaverScreenState>();
 
   @override
   Widget build(BuildContext context) {
@@ -30,12 +24,21 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell> {
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: _screens,
+        children: [
+          const HomeScreen(),
+          StatusSaverScreen(key: _statusScreenKey),
+          const ToolsScreen(),
+          const SettingsScreen(),
+        ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {
+          final wasDifferent = _currentIndex != index;
           setState(() => _currentIndex = index);
+          if (index == 1 && wasDifferent) {
+            _statusScreenKey.currentState?.checkAndReload(promptIfDenied: true);
+          }
         },
         backgroundColor: isDark ? const Color(0xFF1E2830) : Colors.white,
         indicatorColor: const Color(0xFF25D366).withValues(alpha: 0.18),

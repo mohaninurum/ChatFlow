@@ -67,13 +67,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     final directChatCount = HiveStorageService.history.length;
     final templateCount = HiveStorageService.templates.length;
-    final capturedCount = HiveStorageService.deletedMessages.length;
-    final deletedRecordsCount = HiveStorageService.deletedMessages.values.where((m) {
-      if (m is Map) {
-        return m['isDeleted'] == true || (m['message'] ?? '').toString().toLowerCase().contains('deleted');
-      }
-      return false;
-    }).length;
     final downloadedCount = HiveStorageService.statusDownloads.length;
 
     final allHistory = HiveStorageService.history.values.toList();
@@ -109,7 +102,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 borderRadius: BorderRadius.circular(24.r),
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFF25D366).withOpacity(0.3),
+                    color: const Color(0xFF25D366).withValues(alpha: 0.3),
                     blurRadius: 16,
                     offset: const Offset(0, 8),
                   ),
@@ -140,7 +133,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         Container(
                           padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 2.h),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
+                            color: Colors.white.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(10.r),
                           ),
                           child: Text(
@@ -156,7 +149,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
             SizedBox(height: 20.h),
 
-            // Statistics Grid (6 key real database metrics)
+            // Statistics Grid (4 key real database metrics)
             Text(
               'Real Database Statistics',
               style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold),
@@ -182,20 +175,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   value: '$templateCount',
                   label: 'Saved Templates',
                   color: Colors.purple,
-                  theme: theme,
-                ),
-                _buildStatBox(
-                  icon: Icons.notifications_none_outlined,
-                  value: '$capturedCount',
-                  label: 'Notifications Logged',
-                  color: Colors.teal,
-                  theme: theme,
-                ),
-                _buildStatBox(
-                  icon: Icons.mark_chat_unread_outlined,
-                  value: '$deletedRecordsCount',
-                  label: 'Deleted Records',
-                  color: Colors.redAccent,
                   theme: theme,
                 ),
                 _buildStatBox(
@@ -277,7 +256,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 Container(
                   padding: EdgeInsets.all(6.w),
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.12),
+                    color: color.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(icon, color: color, size: 18.sp),
@@ -324,7 +303,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               width: 22.w,
               height: 70.h * heightFactor,
               decoration: BoxDecoration(
-                color: count > 0 ? const Color(0xFF25D366) : Colors.grey.withOpacity(0.2),
+                color: count > 0 ? const Color(0xFF25D366) : Colors.grey.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(6.r),
               ),
             ),
@@ -358,7 +337,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: items.length,
-          separatorBuilder: (_, __) => SizedBox(height: 8.h),
+          separatorBuilder: (_, index) => SizedBox(height: 8.h),
           itemBuilder: (context, index) {
             final item = items[index] as Map;
             final phone = item['phone']?.toString() ?? 'Direct Chat';
@@ -371,7 +350,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               child: ListTile(
                 dense: true,
                 leading: CircleAvatar(
-                  backgroundColor: const Color(0xFF25D366).withOpacity(0.12),
+                  backgroundColor: const Color(0xFF25D366).withValues(alpha: 0.12),
                   child: const Icon(Icons.send_rounded, color: Color(0xFF25D366), size: 16),
                 ),
                 title: Text('Message to $phone', style: const TextStyle(fontWeight: FontWeight.bold)),
