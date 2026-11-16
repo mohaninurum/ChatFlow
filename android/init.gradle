@@ -1,0 +1,26 @@
+allprojects {
+    buildscript {
+        repositories {
+            google()
+            maven { url 'https://maven-central.storage-download.googleapis.com/maven2/' }
+            mavenCentral()
+        }
+    }
+    repositories {
+        google()
+        maven { url 'https://maven-central.storage-download.googleapis.com/maven2/' }
+        mavenCentral()
+    }
+}
+
+gradle.beforeSettings { settings ->
+    settings.pluginManagement {
+        repositories {
+            google()
+            maven { url 'https://maven-central.storage-download.googleapis.com/maven2/' }
+            mavenCentral()
+            gradlePluginPortal()
+        }
+    }
+}
+

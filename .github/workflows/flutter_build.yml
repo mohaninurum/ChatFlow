@@ -18,26 +18,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2️⃣ Setup Flutter
+      # 2️⃣ Setup Java 17 & Gradle Cache
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      # 3️⃣ Setup Flutter
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.44.0'
           channel: 'stable'
 
-      # 3️⃣ Install dependencies
+      # 4️⃣ Configure Gradle Mirrors (Fixes Maven Central 429 Too Many Requests)
+      - name: Configure Gradle Mirrors
+        run: |
+          mkdir -p ~/.gradle
+          cp android/init.gradle ~/.gradle/init.gradle
+
+      # 5️⃣ Install dependencies
       - name: Install dependencies
         run: flutter pub get
 
-      # 4️⃣ Generate code using build_runner
+      # 6️⃣ Generate code using build_runner
       - name: Run build_runner
         run: dart run build_runner build --delete-conflicting-outputs
 
-      # 5️⃣ Build release APK
+      # 7️⃣ Build release APK
       - name: Build APK
         run: flutter build apk --release
 
-      # 6️⃣ Create GitHub Release
+      # 8️⃣ Create GitHub Release
       - name: Create Release & Upload APK
         uses: ncipollo/release-action@v1
         with:
@@ -47,5 +61,3 @@ jobs:
          allowUpdates: true
          artifacts: build/app/outputs/flutter-apk/app-release.apk
          token: ${{ secrets.GITHUB_TOKEN }}
-
-
