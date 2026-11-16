@@ -22,8 +22,10 @@ class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.chatflow.app/channel"
     private var pendingSafResult: MethodChannel.Result? = null
     private var pendingFilePickResult: MethodChannel.Result? = null
+    private var pendingAttachmentResult: MethodChannel.Result? = null
     private val REQUEST_CODE_SAF = 9921
     private val REQUEST_CODE_PICK_FILE = 9922
+    private val REQUEST_CODE_PICK_ATTACHMENT = 9923
 
     private val directWhatsappPaths = listOf(
         // WhatsApp Standard
@@ -367,22 +369,123 @@ class MainActivity : FlutterActivity() {
                         result.error("INVALID_TEXT", "Text is null", null)
                     }
                 }
+                "pickAttachment" -> {
+                    val type = call.argument<String>("type") ?: "document"
+                    try {
+                        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            when (type) {
+                                "audio" -> {
+                                    this.type = "audio/*"
+                                }
+                                else -> {
+                                    this.type = "*/*"
+                                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(
+                                        "application/pdf",
+                                        "application/msword",
+                                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                        "application/vnd.ms-excel",
+                                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        "application/vnd.ms-powerpoint",
+                                        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                        "text/plain",
+                                        "text/*"
+                                    ))
+                                }
+                            }
+                        }
+                        pendingAttachmentResult = result
+                        startActivityForResult(Intent.createChooser(intent, if (type == "audio") "Select Audio" else "Select Document"), REQUEST_CODE_PICK_ATTACHMENT)
+                    } catch (e: Exception) {
+                        result.error("PICK_ERROR", e.message, null)
+                    }
+                }
                 "sendToWhatsApp" -> {
                     val text = call.argument<String>("text") ?: ""
                     val phone = call.argument<String>("phone") ?: ""
+                    val filePath = call.argument<String>("filePath")
+                    val isBusiness = call.argument<Boolean>("isBusiness") ?: false
+                    val cleanNumber = phone.replace("+", "").replace(" ", "").replace("-", "")
+
                     try {
-                        if (phone.isNotEmpty()) {
-                            val cleanNumber = phone.replace("+", "").replace(" ", "").replace("-", "")
+                        if (!filePath.isNullOrEmpty()) {
+                            val file = File(filePath)
+                            if (!file.exists()) {
+                                result.error("FILE_NOT_FOUND", "File does not exist: $filePath", null)
+                                return@setMethodCallHandler
+                            }
+
+                            val contentUri = FileProvider.getUriForFile(
+                                this,
+                                "${packageName}.fileprovider",
+                                file
+                            )
+
+                            val ext = file.extension.lowercase()
+                            val mimeType = when {
+                                ext == "pdf" -> "application/pdf"
+                                ext in listOf("mp3", "m4a", "wav", "aac", "ogg", "opus", "amr") -> "audio/*"
+                                ext in listOf("jpg", "jpeg", "png", "webp", "gif") -> "image/*"
+                                ext in listOf("mp4", "mkv", "3gp", "mov") -> "video/*"
+                                ext in listOf("doc", "docx") -> "application/msword"
+                                ext in listOf("xls", "xlsx") -> "application/vnd.ms-excel"
+                                ext in listOf("ppt", "pptx") -> "application/vnd.ms-powerpoint"
+                                ext == "txt" -> "text/plain"
+                                else -> "*/*"
+                            }
+
+                            val targetPkg = if (isBusiness) "com.whatsapp.w4b" else "com.whatsapp"
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = mimeType
+                                `package` = targetPkg
+                                putExtra(Intent.EXTRA_STREAM, contentUri)
+                                if (cleanNumber.isNotEmpty()) {
+                                    putExtra("jid", "$cleanNumber@s.whatsapp.net")
+                                }
+                                if (text.isNotEmpty()) {
+                                    putExtra(Intent.EXTRA_TEXT, text)
+                                }
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+
+                            try {
+                                startActivity(intent)
+                                result.success(true)
+                            } catch (_: Exception) {
+                                val otherPkg = if (isBusiness) "com.whatsapp" else "com.whatsapp.w4b"
+                                intent.`package` = otherPkg
+                                try {
+                                    startActivity(intent)
+                                    result.success(true)
+                                } catch (_: Exception) {
+                                    intent.`package` = null
+                                    val chooser = Intent.createChooser(intent, "Share via")
+                                    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    startActivity(chooser)
+                                    result.success(true)
+                                }
+                            }
+                        } else if (cleanNumber.isNotEmpty()) {
+                            val targetPkg = if (isBusiness) "com.whatsapp.w4b" else "com.whatsapp"
                             val uri = Uri.parse("https://api.whatsapp.com/send?phone=$cleanNumber&text=${Uri.encode(text)}")
                             val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                                `package` = targetPkg
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
-                            startActivity(intent)
-                            result.success(true)
+                            try {
+                                startActivity(intent)
+                                result.success(true)
+                            } catch (_: Exception) {
+                                val fallbackIntent = Intent(Intent.ACTION_VIEW, uri).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(fallbackIntent)
+                                result.success(true)
+                            }
                         } else {
                             val intent = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
-                                `package` = "com.whatsapp"
+                                `package` = if (isBusiness) "com.whatsapp.w4b" else "com.whatsapp"
                                 putExtra(Intent.EXTRA_TEXT, text)
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
@@ -390,23 +493,12 @@ class MainActivity : FlutterActivity() {
                                 startActivity(intent)
                                 result.success(true)
                             } catch (_: Exception) {
-                                val w4bIntent = Intent(Intent.ACTION_SEND).apply {
+                                val chooserIntent = Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"
-                                    `package` = "com.whatsapp.w4b"
                                     putExtra(Intent.EXTRA_TEXT, text)
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                 }
-                                try {
-                                    startActivity(w4bIntent)
-                                    result.success(true)
-                                } catch (_: Exception) {
-                                    val chooserIntent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(Intent.EXTRA_TEXT, text)
-                                    }
-                                    startActivity(Intent.createChooser(chooserIntent, "Send via"))
-                                    result.success(true)
-                                }
+                                startActivity(Intent.createChooser(chooserIntent, "Send via"))
+                                result.success(true)
                             }
                         }
                     } catch (e: Exception) {
@@ -635,6 +727,55 @@ class MainActivity : FlutterActivity() {
                 pendingFilePickResult?.success(null)
             }
             pendingFilePickResult = null
+        } else if (requestCode == REQUEST_CODE_PICK_ATTACHMENT) {
+            if (resultCode == Activity.RESULT_OK && data?.data != null) {
+                val uri = data.data!!
+                Thread {
+                    try {
+                        var fileName = "attachment"
+                        var fileSize = 0L
+                        val cursor = contentResolver.query(uri, null, null, null, null)
+                        cursor?.use {
+                            if (it.moveToFirst()) {
+                                val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                                val sizeIndex = it.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                                if (nameIndex != -1) fileName = it.getString(nameIndex) ?: fileName
+                                if (sizeIndex != -1) fileSize = it.getLong(sizeIndex)
+                            }
+                        }
+
+                        val cacheDir = File(cacheDir, "chat_attachments")
+                        if (!cacheDir.exists()) cacheDir.mkdirs()
+                        val targetFile = File(cacheDir, "${System.currentTimeMillis()}_$fileName")
+                        contentResolver.openInputStream(uri)?.use { input ->
+                            targetFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        if (fileSize == 0L) {
+                            fileSize = targetFile.length()
+                        }
+
+                        val resMap = mapOf(
+                            "path" to targetFile.absolutePath,
+                            "name" to fileName,
+                            "size" to fileSize
+                        )
+                        runOnUiThread {
+                            pendingAttachmentResult?.success(resMap)
+                            pendingAttachmentResult = null
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            pendingAttachmentResult?.error("ATTACHMENT_ERROR", e.message, null)
+                            pendingAttachmentResult = null
+                        }
+                    }
+                }.start()
+            } else {
+                pendingAttachmentResult?.success(null)
+                pendingAttachmentResult = null
+            }
         }
     }
 }

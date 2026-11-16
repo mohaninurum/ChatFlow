@@ -1,8 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/storage/hive_storage_service.dart';
 import '../../../../core/utils/country_codes.dart';
@@ -16,11 +19,17 @@ class DirectChatScreen extends ConsumerStatefulWidget {
 }
 
 class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
+  static const _channel = MethodChannel('com.chatflow.app/channel');
+  final _imagePicker = ImagePicker();
+
   final _phoneController = TextEditingController();
   final _messageController = TextEditingController();
   CountryCodeItem _selectedCountry = allCountryCodes.first; // Default India (+91)
   bool _isBusiness = false;
   String? _phoneValidationError;
+
+  // Attachment state: { 'path': String, 'name': String, 'size': int, 'type': 'image'|'video'|'document'|'audio' }
+  Map<String, dynamic>? _selectedAttachment;
 
   @override
   void initState() {
@@ -51,6 +60,272 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
         setState(() => _phoneValidationError = null);
       }
     }
+    if (mounted) setState(() {});
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes <= 0) return '0 B';
+    final kb = bytes / 1024;
+    if (kb < 1024) {
+      return '${kb.toStringAsFixed(1)} KB';
+    }
+    final mb = kb / 1024;
+    return '${mb.toStringAsFixed(1)} MB';
+  }
+
+  Future<void> _pickDocument() async {
+    try {
+      final res = await _channel.invokeMethod<Map>('pickAttachment', {'type': 'document'});
+      if (res != null) {
+        setState(() {
+          _selectedAttachment = {
+            'path': res['path']?.toString() ?? '',
+            'name': res['name']?.toString() ?? 'Document.pdf',
+            'size': res['size'] as int? ?? 0,
+            'type': 'document',
+          };
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to select document: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickAudio() async {
+    try {
+      final res = await _channel.invokeMethod<Map>('pickAttachment', {'type': 'audio'});
+      if (res != null) {
+        setState(() {
+          _selectedAttachment = {
+            'path': res['path']?.toString() ?? '',
+            'name': res['name']?.toString() ?? 'Audio_File.mp3',
+            'size': res['size'] as int? ?? 0,
+            'type': 'audio',
+          };
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to select audio: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickGallery() async {
+    try {
+      final picked = await _imagePicker.pickImage(source: ImageSource.gallery);
+      if (picked != null) {
+        final file = File(picked.path);
+        final size = await file.length();
+        setState(() {
+          _selectedAttachment = {
+            'path': picked.path,
+            'name': picked.name,
+            'size': size,
+            'type': 'image',
+          };
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to pick image: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickCamera() async {
+    try {
+      final status = await Permission.camera.request();
+      if (status.isDenied || status.isPermanentlyDenied) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Camera permission is required to capture photos.')),
+          );
+        }
+        return;
+      }
+      final picked = await _imagePicker.pickImage(source: ImageSource.camera);
+      if (picked != null) {
+        final file = File(picked.path);
+        final size = await file.length();
+        setState(() {
+          _selectedAttachment = {
+            'path': picked.path,
+            'name': picked.name,
+            'size': size,
+            'type': 'image',
+          };
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to capture photo: $e')),
+        );
+      }
+    }
+  }
+
+  void _clearAttachment() {
+    setState(() {
+      _selectedAttachment = null;
+    });
+  }
+
+  void _showAttachmentMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return Container(
+          margin: EdgeInsets.all(16.w),
+          padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 22.h),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1F2C34) : Colors.white,
+            borderRadius: BorderRadius.circular(24.r),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.15),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36.w,
+                height: 4.h,
+                decoration: BoxDecoration(
+                  color: Colors.grey[400],
+                  borderRadius: BorderRadius.circular(2.r),
+                ),
+              ),
+              SizedBox(height: 18.h),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildAttachmentItem(
+                    icon: Icons.insert_drive_file_rounded,
+                    label: 'Document',
+                    gradient: const [Color(0xFF7F66FF), Color(0xFF533CE1)],
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _pickDocument();
+                    },
+                  ),
+                  _buildAttachmentItem(
+                    icon: Icons.camera_alt_rounded,
+                    label: 'Camera',
+                    gradient: const [Color(0xFFD3396D), Color(0xFFC2185B)],
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _pickCamera();
+                    },
+                  ),
+                  _buildAttachmentItem(
+                    icon: Icons.photo_rounded,
+                    label: 'Gallery',
+                    gradient: const [Color(0xFFAC44CF), Color(0xFF7B1FA2)],
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _pickGallery();
+                    },
+                  ),
+                ],
+              ),
+              SizedBox(height: 20.h),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildAttachmentItem(
+                    icon: Icons.headphones_rounded,
+                    label: 'Audio',
+                    gradient: const [Color(0xFFE37B14), Color(0xFFEF6C00)],
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _pickAudio();
+                    },
+                  ),
+                  _buildAttachmentItem(
+                    icon: Icons.auto_stories_rounded,
+                    label: 'Template',
+                    gradient: const [Color(0xFF0294FF), Color(0xFF0277BD)],
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _showTemplatePicker();
+                    },
+                  ),
+                  _buildAttachmentItem(
+                    icon: Icons.contacts_rounded,
+                    label: 'Contact',
+                    gradient: const [Color(0xFF00A884), Color(0xFF00796B)],
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _showContactsOrFavoritesPicker();
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAttachmentItem({
+    required IconData icon,
+    required String label,
+    required List<Color> gradient,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 56.w,
+            height: 56.w,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: gradient,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: gradient.first.withValues(alpha: 0.35),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Icon(icon, color: Colors.white, size: 26.sp),
+          ),
+          SizedBox(height: 8.h),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.sp,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showCountryPicker() {
@@ -111,7 +386,7 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
                   Expanded(
                     child: ListView.separated(
                       itemCount: filtered.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      separatorBuilder: (ctx, i) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final item = filtered[index];
                         final isSelected = item.dialCode == _selectedCountry.dialCode &&
@@ -124,10 +399,10 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
                             item.dialCode,
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              color: isSelected ? Theme.of(context).colorScheme.primary : Colors.grey[700],
+                              color: isSelected ? const Color(0xFF25D366) : Colors.grey[700],
                             ),
                           ),
-                          tileColor: isSelected ? Theme.of(context).colorScheme.primary.withOpacity(0.08) : null,
+                          tileColor: isSelected ? const Color(0xFF25D366).withValues(alpha: 0.12) : null,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
                           onTap: () {
                             setState(() => _selectedCountry = item);
@@ -164,8 +439,8 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
             child: Column(
               children: [
                 TabBar(
-                  labelColor: Theme.of(context).colorScheme.primary,
-                  indicatorColor: Theme.of(context).colorScheme.primary,
+                  labelColor: const Color(0xFF25D366),
+                  indicatorColor: const Color(0xFF25D366),
                   tabs: const [
                     Tab(icon: Icon(Icons.star), text: 'Favorite Contacts'),
                     Tab(icon: Icon(Icons.history), text: 'Recent Contacts'),
@@ -194,7 +469,7 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
                                 final phone = favorites[i];
                                 return ListTile(
                                   leading: CircleAvatar(
-                                    backgroundColor: Colors.amber.withOpacity(0.2),
+                                    backgroundColor: Colors.amber.withValues(alpha: 0.2),
                                     child: const Icon(Icons.star, color: Colors.amber),
                                   ),
                                   title: Text(phone, style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -219,8 +494,8 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
                                 final msg = item['message']?.toString() ?? '';
                                 return ListTile(
                                   leading: CircleAvatar(
-                                    backgroundColor: Colors.green.withOpacity(0.15),
-                                    child: const Icon(Icons.phone, color: Colors.green),
+                                    backgroundColor: const Color(0xFF25D366).withValues(alpha: 0.15),
+                                    child: const Icon(Icons.phone, color: Color(0xFF25D366)),
                                   ),
                                   title: Text(phone, style: const TextStyle(fontWeight: FontWeight.bold)),
                                   subtitle: msg.isNotEmpty
@@ -278,7 +553,7 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
             Expanded(
               child: ListView.separated(
                 itemCount: templates.length,
-                separatorBuilder: (_, __) => const Divider(),
+                separatorBuilder: (context, index) => const Divider(),
                 itemBuilder: (context, index) {
                   final t = templates[index] as Map;
                   final title = t['title'] ?? '';
@@ -316,7 +591,6 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
       return;
     }
 
-    // Modal to fill variables
     final nameCtrl = TextEditingController();
     final orderCtrl = TextEditingController();
     final amountCtrl = TextEditingController();
@@ -377,7 +651,7 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
     final rawPhone = _phoneController.text.trim();
     if (rawPhone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a phone number')),
+        const SnackBar(content: Text('Please enter a phone number first')),
       );
       return;
     }
@@ -401,35 +675,29 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
       isBusiness: _isBusiness,
     );
 
-    final encodedMsg = Uri.encodeComponent(message);
-
-    // Deep link schemes:
-    // Standard WhatsApp: whatsapp://send?phone=fullNumber&text=encodedMsg
-    // Or wa.me fallback
-    final appScheme = _isBusiness
-        ? 'whatsapp://send?phone=$fullNumber${message.isNotEmpty ? '&text=$encodedMsg' : ''}'
-        : 'https://wa.me/$fullNumber${message.isNotEmpty ? '?text=$encodedMsg' : ''}';
-
-    final uri = Uri.parse(appScheme);
-
     try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        // Fallback to wa.me browser link
-        final fallbackUri = Uri.parse('https://wa.me/$fullNumber${message.isNotEmpty ? '?text=$encodedMsg' : ''}');
-        if (await canLaunchUrl(fallbackUri)) {
-          await launchUrl(fallbackUri, mode: LaunchMode.externalApplication);
+      final res = await _channel.invokeMethod('sendToWhatsApp', {
+        'phone': fullNumber,
+        'text': message,
+        'filePath': _selectedAttachment?['path'],
+        'isBusiness': _isBusiness,
+      });
+
+      if (res != true) {
+        final encodedMsg = Uri.encodeComponent(message);
+        final appScheme = _isBusiness
+            ? 'whatsapp://send?phone=$fullNumber${message.isNotEmpty ? '&text=$encodedMsg' : ''}'
+            : 'https://wa.me/$fullNumber${message.isNotEmpty ? '?text=$encodedMsg' : ''}';
+
+        final uri = Uri.parse(appScheme);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
         } else {
-          if (mounted) {
-            _showWhatsAppNotInstalledDialog();
-          }
+          if (mounted) _showWhatsAppNotInstalledDialog();
         }
       }
-    } catch (e) {
-      if (mounted) {
-        _showWhatsAppNotInstalledDialog();
-      }
+    } catch (_) {
+      if (mounted) _showWhatsAppNotInstalledDialog();
     }
   }
 
@@ -468,18 +736,9 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
     );
   }
 
-  void _copyToClipboard(String text, String label) {
-    if (text.isEmpty) return;
-    Clipboard.setData(ClipboardData(text: text));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Copied $label to clipboard!')),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
 
     final currentClean = _phoneController.text.replaceAll(RegExp(r'\D'), '');
@@ -488,169 +747,193 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Direct Chat'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Direct Chat', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+              currentClean.isNotEmpty ? fullNumber : 'Message unsaved contacts',
+              style: TextStyle(fontSize: 12.sp, color: Colors.grey[400]),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.contacts_outlined),
-            tooltip: 'Pick from Favorites / Recents',
+            tooltip: 'Favorites & Recents',
             onPressed: _showContactsOrFavoritesPicker,
           ),
           IconButton(
             icon: Icon(
-              isFavorite ? Icons.star : Icons.star_border,
+              isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
               color: isFavorite ? Colors.amber : null,
             ),
             tooltip: isFavorite ? 'Remove Favorite' : 'Save as Favorite',
             onPressed: fullNumber.isNotEmpty
                 ? () async {
+                    final messenger = ScaffoldMessenger.of(context);
                     await HiveStorageService.toggleFavoriteContact(fullNumber);
+                    if (!mounted) return;
                     setState(() {});
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(isFavorite ? 'Removed from favorites' : 'Saved to favorite contacts!'),
-                        ),
-                      );
-                    }
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(isFavorite ? 'Removed from favorites' : 'Saved to favorite contacts!'),
+                      ),
+                    );
                   }
                 : null,
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 16.h),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // App selector chip toggle (WhatsApp vs WhatsApp Business)
-            Container(
-              padding: EdgeInsets.all(4.w),
-              decoration: BoxDecoration(
-                color: isDark ? Colors.grey[900] : Colors.grey[200],
-                borderRadius: BorderRadius.circular(16.r),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _isBusiness = false),
-                      child: Container(
-                        padding: EdgeInsets.symmetric(vertical: 10.h),
-                        decoration: BoxDecoration(
-                          color: !_isBusiness ? const Color(0xFF25D366) : Colors.transparent,
-                          borderRadius: BorderRadius.circular(12.r),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.chat,
-                              size: 18.sp,
-                              color: !_isBusiness ? Colors.white : Colors.grey,
-                            ),
-                            SizedBox(width: 8.w),
-                            Text(
-                              'WhatsApp',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: !_isBusiness ? Colors.white : Colors.grey,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _isBusiness = true),
-                      child: Container(
-                        padding: EdgeInsets.symmetric(vertical: 10.h),
-                        decoration: BoxDecoration(
-                          color: _isBusiness ? const Color(0xFF128C7E) : Colors.transparent,
-                          borderRadius: BorderRadius.circular(12.r),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.storefront,
-                              size: 18.sp,
-                              color: _isBusiness ? Colors.white : Colors.grey,
-                            ),
-                            SizedBox(width: 8.w),
-                            Text(
-                              'WA Business',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: _isBusiness ? Colors.white : Colors.grey,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(height: 16.h),
+      body: Column(
+        children: [
+          // 1. Recipient Phone & App selector header
+          _buildRecipientHeader(isDark),
 
-            // Recently used numbers chips (horizontal)
-            _buildRecentNumbersStrip(),
-            SizedBox(height: 16.h),
+          // 2. Chat Canvas with WhatsApp Wallpaper Background & Live Message Bubble
+          Expanded(
+            child: _buildChatCanvas(isDark),
+          ),
 
-            // Phone input row with Country Code button
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                InkWell(
-                  onTap: _showCountryPicker,
-                  borderRadius: BorderRadius.circular(16.r),
+          // 3. Authentic WhatsApp Input Bar & Professional Circular Send Button
+          _buildWhatsAppInputBar(isDark),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecipientHeader(bool isDark) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 10.h),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1F2C34) : Colors.white,
+        border: Border(bottom: BorderSide(color: isDark ? Colors.black26 : Colors.grey[200]!)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // WhatsApp vs WA Business toggle chips
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() => _isBusiness = false),
                   child: Container(
-                    height: 56.h,
-                    padding: EdgeInsets.symmetric(horizontal: 12.w),
+                    padding: EdgeInsets.symmetric(vertical: 7.h),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.withOpacity(0.3)),
-                      borderRadius: BorderRadius.circular(16.r),
-                      color: isDark ? const Color(0xFF202C33) : Colors.white,
+                      color: !_isBusiness ? const Color(0xFF25D366) : (isDark ? Colors.grey[850] : Colors.grey[100]),
+                      borderRadius: BorderRadius.circular(10.r),
                     ),
                     child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text(_selectedCountry.flag, style: TextStyle(fontSize: 20.sp)),
+                        Icon(Icons.chat_rounded, size: 16.sp, color: !_isBusiness ? Colors.white : Colors.grey),
                         SizedBox(width: 6.w),
                         Text(
-                          _selectedCountry.dialCode,
-                          style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold),
+                          'WhatsApp',
+                          style: TextStyle(
+                            fontSize: 12.5.sp,
+                            fontWeight: FontWeight.bold,
+                            color: !_isBusiness ? Colors.white : Colors.grey,
+                          ),
                         ),
-                        Icon(Icons.arrow_drop_down, color: Colors.grey[600]),
                       ],
                     ),
                   ),
                 ),
-                SizedBox(width: 10.w),
-                Expanded(
+              ),
+              SizedBox(width: 8.w),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() => _isBusiness = true),
+                  child: Container(
+                    padding: EdgeInsets.symmetric(vertical: 7.h),
+                    decoration: BoxDecoration(
+                      color: _isBusiness ? const Color(0xFF128C7E) : (isDark ? Colors.grey[850] : Colors.grey[100]),
+                      borderRadius: BorderRadius.circular(10.r),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.storefront_rounded, size: 16.sp, color: _isBusiness ? Colors.white : Colors.grey),
+                        SizedBox(width: 6.w),
+                        Text(
+                          'WA Business',
+                          style: TextStyle(
+                            fontSize: 12.5.sp,
+                            fontWeight: FontWeight.bold,
+                            color: _isBusiness ? Colors.white : Colors.grey,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 10.h),
+
+          // Country code + Phone input field
+          Row(
+            children: [
+              InkWell(
+                onTap: _showCountryPicker,
+                borderRadius: BorderRadius.circular(12.r),
+                child: Container(
+                  height: 48.h,
+                  padding: EdgeInsets.symmetric(horizontal: 10.w),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF121B22) : const Color(0xFFF7F8FA),
+                    borderRadius: BorderRadius.circular(12.r),
+                    border: Border.all(color: isDark ? Colors.grey[800]! : Colors.grey[300]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Text(_selectedCountry.flag, style: TextStyle(fontSize: 18.sp)),
+                      SizedBox(width: 4.w),
+                      Text(
+                        _selectedCountry.dialCode,
+                        style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold),
+                      ),
+                      const Icon(Icons.arrow_drop_down, color: Colors.grey),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(width: 8.w),
+              Expanded(
+                child: Container(
+                  height: 48.h,
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF121B22) : const Color(0xFFF7F8FA),
+                    borderRadius: BorderRadius.circular(12.r),
+                    border: Border.all(
+                      color: _phoneValidationError != null
+                          ? Colors.red
+                          : (isDark ? Colors.grey[800]! : Colors.grey[300]!),
+                    ),
+                  ),
                   child: TextField(
                     controller: _phoneController,
                     keyboardType: TextInputType.phone,
+                    style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.w600),
                     decoration: InputDecoration(
-                      hintText: 'Enter phone number',
-                      errorText: _phoneValidationError,
-                      filled: true,
-                      fillColor: isDark ? const Color(0xFF202C33) : Colors.white,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16.r)),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 16.h),
+                      hintText: 'Enter phone number...',
+                      hintStyle: TextStyle(fontSize: 14.sp, color: Colors.grey[500]),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 12.h),
                       suffixIcon: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           if (_phoneController.text.isNotEmpty)
                             IconButton(
-                              icon: const Icon(Icons.clear, size: 18),
+                              icon: const Icon(Icons.clear, size: 16),
                               onPressed: () => _phoneController.clear(),
                             ),
                           IconButton(
-                            icon: const Icon(Icons.paste, size: 18),
-                            tooltip: 'Paste',
+                            icon: const Icon(Icons.content_paste_rounded, size: 18),
+                            tooltip: 'Paste Number',
                             onPressed: () async {
                               final data = await Clipboard.getData('text/plain');
                               if (data?.text != null) {
@@ -663,103 +946,23 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
                     ),
                   ),
                 ),
-              ],
-            ),
-            SizedBox(height: 16.h),
-
-            // Message Header with Quick Reply button
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Message (Optional)',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.sp),
-                ),
-                TextButton.icon(
-                  onPressed: _showTemplatePicker,
-                  icon: const Icon(Icons.auto_stories, size: 16),
-                  label: const Text('Use Template'),
-                ),
-              ],
-            ),
-            SizedBox(height: 6.h),
-
-            // Message TextField with Character Counter
-            TextField(
-              controller: _messageController,
-              maxLines: 4,
-              maxLength: 2000,
-              decoration: InputDecoration(
-                hintText: 'Type your message or pick a quick reply template...',
-                filled: true,
-                fillColor: isDark ? const Color(0xFF202C33) : Colors.white,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(16.r)),
-                counterText: '${_messageController.text.length} / 2000 characters',
-                contentPadding: EdgeInsets.all(16.w),
               ),
+            ],
+          ),
+
+          // Validation Error
+          if (_phoneValidationError != null) ...[
+            SizedBox(height: 4.h),
+            Text(
+              _phoneValidationError!,
+              style: TextStyle(color: Colors.redAccent, fontSize: 11.sp),
             ),
-            SizedBox(height: 16.h),
-
-            // Live WhatsApp Bubble Preview
-            _buildMessagePreviewCard(isDark),
-            SizedBox(height: 20.h),
-
-            // Copy Action Buttons Row
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: fullNumber.isNotEmpty
-                        ? () => _copyToClipboard(fullNumber, 'Phone Number')
-                        : null,
-                    icon: const Icon(Icons.copy, size: 16),
-                    label: const Text('Copy Number'),
-                    style: OutlinedButton.styleFrom(
-                      padding: EdgeInsets.symmetric(vertical: 12.h),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14.r)),
-                    ),
-                  ),
-                ),
-                SizedBox(width: 10.w),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _messageController.text.isNotEmpty
-                        ? () => _copyToClipboard(_messageController.text, 'Message')
-                        : null,
-                    icon: const Icon(Icons.message_outlined, size: 16),
-                    label: const Text('Copy Message'),
-                    style: OutlinedButton.styleFrom(
-                      padding: EdgeInsets.symmetric(vertical: 12.h),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14.r)),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 16.h),
-
-            // Main Launch Button
-            ElevatedButton.icon(
-              onPressed: _openWhatsApp,
-              icon: Icon(_isBusiness ? Icons.storefront : Icons.send, size: 20),
-              label: Text(
-                _isBusiness ? 'Open in WhatsApp Business' : 'Open in WhatsApp',
-                style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _isBusiness ? const Color(0xFF128C7E) : const Color(0xFF25D366),
-                foregroundColor: Colors.white,
-                padding: EdgeInsets.symmetric(vertical: 16.h),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-                elevation: 1,
-              ),
-            ),
-            SizedBox(height: 24.h),
-
-            // Recent chats in Direct Chat
-            _buildRecentChatHistorySection(),
           ],
-        ),
+
+          // Quick Recent Numbers horizontal strip
+          SizedBox(height: 8.h),
+          _buildRecentNumbersStrip(),
+        ],
       ),
     );
   }
@@ -775,8 +978,7 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
         for (var item in rawItems) {
           if (item is Map && item['phone'] != null) {
             final p = item['phone'].toString();
-            if (!seen.contains(p)) {
-              seen.add(p);
+            if (seen.add(p)) {
               uniqueRecent.add(p);
             }
           }
@@ -785,182 +987,488 @@ class _DirectChatScreenState extends ConsumerState<DirectChatScreen> {
 
         if (uniqueRecent.isEmpty) return const SizedBox.shrink();
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Recently Used Numbers',
-              style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.w600, color: Colors.grey),
-            ),
-            SizedBox(height: 8.h),
-            SizedBox(
-              height: 36.h,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: uniqueRecent.length,
-                separatorBuilder: (_, __) => SizedBox(width: 8.w),
-                itemBuilder: (context, index) {
-                  final phone = uniqueRecent[index];
-                  return ActionChip(
-                    avatar: const Icon(Icons.history, size: 14),
-                    label: Text(phone, style: TextStyle(fontSize: 12.sp)),
-                    onPressed: () {
-                      _phoneController.text = phone.replaceAll(RegExp(r'\D'), '');
-                    },
-                  );
+        return SizedBox(
+          height: 28.h,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: uniqueRecent.length,
+            separatorBuilder: (context, index) => SizedBox(width: 6.w),
+            itemBuilder: (context, index) {
+              final phone = uniqueRecent[index];
+              return InkWell(
+                onTap: () {
+                  _phoneController.text = phone.replaceAll(RegExp(r'\D'), '');
                 },
-              ),
-            ),
-          ],
+                borderRadius: BorderRadius.circular(8.r),
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF25D366).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8.r),
+                    border: Border.all(color: const Color(0xFF25D366).withValues(alpha: 0.2)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.history, size: 12.sp, color: const Color(0xFF25D366)),
+                      SizedBox(width: 4.w),
+                      Text(
+                        phone,
+                        style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.w600, color: const Color(0xFF25D366)),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
         );
       },
     );
   }
 
-  Widget _buildMessagePreviewCard(bool isDark) {
-    final msg = _messageController.text.trim();
-    if (msg.isEmpty) {
-      return const SizedBox.shrink();
-    }
+  Widget _buildChatCanvas(bool isDark) {
+    final msg = _messageController.text;
+    final hasContent = msg.trim().isNotEmpty || _selectedAttachment != null;
 
     return Container(
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1F2C34) : const Color(0xFFE5DDD5),
-        borderRadius: BorderRadius.circular(16.r),
-        image: const DecorationImage(
-          image: NetworkImage('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png'),
-          fit: BoxFit.cover,
-          opacity: 0.05,
-        ),
-      ),
-      padding: EdgeInsets.all(14.w),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      width: double.infinity,
+      color: isDark ? const Color(0xFF0B141A) : const Color(0xFFEFEAE2),
+      child: Stack(
         children: [
-          Row(
-            children: [
-              Icon(Icons.remove_red_eye_outlined, size: 14.sp, color: Colors.grey[700]),
-              SizedBox(width: 6.w),
-              Text(
-                'WhatsApp Message Preview',
-                style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.bold, color: Colors.grey[700]),
-              ),
-            ],
-          ),
-          SizedBox(height: 10.h),
-          Align(
-            alignment: Alignment.centerRight,
-            child: Container(
-              constraints: BoxConstraints(maxWidth: 260.w),
-              padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF005D4B) : const Color(0xFFD9FDD3),
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(14.r),
-                  bottomLeft: Radius.circular(14.r),
-                  topRight: Radius.circular(4.r),
-                  bottomRight: Radius.circular(14.r),
-                ),
-                boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 4, offset: const Offset(0, 2)),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    msg,
-                    style: TextStyle(
-                      fontSize: 14.sp,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                  SizedBox(height: 4.h),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Just now',
-                        style: TextStyle(fontSize: 10.sp, color: Colors.grey[600]),
-                      ),
-                      SizedBox(width: 4.w),
-                      Icon(Icons.done_all, size: 14.sp, color: Colors.blue),
-                    ],
-                  ),
-                ],
+          // Subtle authentic WhatsApp doodle background pattern effect
+          Positioned.fill(
+            child: Opacity(
+              opacity: isDark ? 0.04 : 0.06,
+              child: Image.network(
+                'https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png',
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
               ),
             ),
+          ),
+
+          // Chat messages scrollable view
+          ListView(
+            padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 14.h),
+            children: [
+              // Security end-to-end encryption pill
+              Center(
+                child: Container(
+                  margin: EdgeInsets.symmetric(vertical: 8.h),
+                  padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF182229) : const Color(0xFFFFF9C4),
+                    borderRadius: BorderRadius.circular(8.r),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.lock_rounded, size: 12.sp, color: isDark ? Colors.amber[300] : Colors.orange[800]),
+                      SizedBox(width: 6.w),
+                      Flexible(
+                        child: Text(
+                          'Direct message to unsaved contact with 100% privacy',
+                          style: TextStyle(
+                            fontSize: 10.5.sp,
+                            color: isDark ? Colors.amber[300] : Colors.orange[900],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(height: 12.h),
+
+              // Outgoing Message Bubble (WhatsApp Styled)
+              Align(
+                alignment: Alignment.centerRight,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: 0.82.sw),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF005C4B) : const Color(0xFFE7FFDB),
+                      borderRadius: BorderRadius.only(
+                        topLeft: Radius.circular(16.r),
+                        topRight: Radius.circular(4.r),
+                        bottomLeft: Radius.circular(16.r),
+                        bottomRight: Radius.circular(16.r),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.08),
+                          blurRadius: 4,
+                          offset: const Offset(0, 1),
+                        ),
+                      ],
+                    ),
+                    padding: EdgeInsets.all(_selectedAttachment != null ? 6.w : 10.w),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Attachment preview in bubble
+                        if (_selectedAttachment != null)
+                          _buildBubbleAttachmentPreview(isDark),
+
+                        // Message Text
+                        Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 4.h),
+                          child: Text(
+                            hasContent
+                                ? (msg.trim().isNotEmpty ? msg : '')
+                                : 'Type your message or attach media/documents below...',
+                            style: TextStyle(
+                              fontSize: 14.5.sp,
+                              height: 1.35,
+                              color: hasContent
+                                  ? (isDark ? Colors.white : const Color(0xFF111B21))
+                                  : Colors.grey[600],
+                              fontStyle: hasContent ? FontStyle.normal : FontStyle.italic,
+                            ),
+                          ),
+                        ),
+
+                        // Bubble Footer: Time + WhatsApp Double Blue Ticks
+                        Align(
+                          alignment: Alignment.bottomRight,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}',
+                                style: TextStyle(
+                                  fontSize: 10.sp,
+                                  color: isDark ? Colors.white70 : Colors.black54,
+                                ),
+                              ),
+                              SizedBox(width: 4.w),
+                              Icon(
+                                Icons.done_all_rounded,
+                                size: 15.sp,
+                                color: const Color(0xFF53BDEB), // Authentic WhatsApp blue tick
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildRecentChatHistorySection() {
-    return ValueListenableBuilder(
-      valueListenable: HiveStorageService.history.listenable(),
-      builder: (context, Box box, _) {
-        if (box.isEmpty) return const SizedBox.shrink();
+  Widget _buildBubbleAttachmentPreview(bool isDark) {
+    final type = _selectedAttachment!['type'] as String;
+    final name = _selectedAttachment!['name'] as String;
+    final size = _selectedAttachment!['size'] as int;
+    final path = _selectedAttachment!['path'] as String;
 
-        final items = box.toMap().entries.toList().reversed.take(5).toList();
+    if (type == 'image') {
+      return Stack(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12.r),
+            child: Image.file(
+              File(path),
+              width: double.infinity,
+              height: 180.h,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => Container(
+                height: 120.h,
+                color: Colors.black12,
+                child: const Center(child: Icon(Icons.broken_image)),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 6.h,
+            right: 6.w,
+            child: CircleAvatar(
+              radius: 14.r,
+              backgroundColor: Colors.black54,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: const Icon(Icons.close, size: 16, color: Colors.white),
+                onPressed: _clearAttachment,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    if (type == 'audio') {
+      return Container(
+        margin: EdgeInsets.only(bottom: 6.h),
+        padding: EdgeInsets.all(10.w),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF182229) : Colors.white,
+          borderRadius: BorderRadius.circular(12.r),
+        ),
+        child: Row(
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            Container(
+              padding: EdgeInsets.all(10.w),
+              decoration: const BoxDecoration(
+                color: Color(0xFFE37B14),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.headphones_rounded, color: Colors.white, size: 20),
+            ),
+            SizedBox(width: 10.w),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp),
+                  ),
+                  Text(
+                    'Audio • ${_formatFileSize(size)}',
+                    style: TextStyle(fontSize: 11.sp, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close, size: 18, color: Colors.grey),
+              onPressed: _clearAttachment,
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Default: Document / PDF
+    return Container(
+      margin: EdgeInsets.only(bottom: 6.h),
+      padding: EdgeInsets.all(10.w),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF182229) : Colors.white,
+        borderRadius: BorderRadius.circular(12.r),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: EdgeInsets.all(10.w),
+            decoration: BoxDecoration(
+              color: name.toLowerCase().endsWith('.pdf') ? Colors.redAccent : const Color(0xFF5A45FF),
+              borderRadius: BorderRadius.circular(8.r),
+            ),
+            child: Icon(
+              name.toLowerCase().endsWith('.pdf') ? Icons.picture_as_pdf_rounded : Icons.insert_drive_file_rounded,
+              color: Colors.white,
+              size: 22.sp,
+            ),
+          ),
+          SizedBox(width: 10.w),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Recent Direct Chats',
-                  style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.bold),
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.sp),
                 ),
-                TextButton(
-                  onPressed: () async {
-                    await box.clear();
-                  },
-                  child: const Text('Clear', style: TextStyle(color: Colors.red)),
+                Text(
+                  '${name.split('.').last.toUpperCase()} • ${_formatFileSize(size)}',
+                  style: TextStyle(fontSize: 11.sp, color: Colors.grey[600]),
                 ),
               ],
             ),
-            SizedBox(height: 8.h),
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: items.length,
-              separatorBuilder: (_, __) => SizedBox(height: 8.h),
-              itemBuilder: (context, index) {
-                final entry = items[index];
-                final item = entry.value as Map;
-                final phone = item['phone']?.toString() ?? '';
-                final msg = item['message']?.toString() ?? '';
-                final isBiz = item['isBusiness'] == true;
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 18, color: Colors.grey),
+            onPressed: _clearAttachment,
+          ),
+        ],
+      ),
+    );
+  }
 
-                return Card(
-                  elevation: 1,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14.r)),
-                  child: ListTile(
-                    dense: true,
-                    leading: CircleAvatar(
-                      backgroundColor: isBiz ? Colors.teal.withOpacity(0.15) : Colors.green.withOpacity(0.15),
-                      child: Icon(isBiz ? Icons.storefront : Icons.chat, color: isBiz ? Colors.teal : Colors.green, size: 18),
+  Widget _buildWhatsAppInputBar(bool isDark) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 8.h),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF121B22) : const Color(0xFFF0F2F5),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Top attachment chip indicator if selected
+            if (_selectedAttachment != null)
+              Container(
+                margin: EdgeInsets.only(bottom: 8.h),
+                padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1F2C34) : Colors.white,
+                  borderRadius: BorderRadius.circular(16.r),
+                  border: Border.all(color: const Color(0xFF25D366).withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _selectedAttachment!['type'] == 'audio'
+                          ? Icons.headphones_rounded
+                          : (_selectedAttachment!['type'] == 'image' ? Icons.image_rounded : Icons.description_rounded),
+                      color: const Color(0xFF25D366),
+                      size: 18.sp,
                     ),
-                    title: Text(phone, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: msg.isNotEmpty ? Text(msg, maxLines: 1, overflow: TextOverflow.ellipsis) : null,
-                    trailing: IconButton(
-                      icon: const Icon(Icons.replay, color: Colors.green, size: 20),
-                      tooltip: 'Reuse',
-                      onPressed: () {
-                        _phoneController.text = phone.replaceAll(RegExp(r'\D'), '');
-                        _messageController.text = msg;
-                      },
+                    SizedBox(width: 8.w),
+                    Expanded(
+                      child: Text(
+                        'Attached: ${_selectedAttachment!['name']} (${_formatFileSize(_selectedAttachment!['size'] as int)})',
+                        style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.w600),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    InkWell(
+                      onTap: _clearAttachment,
+                      child: const Icon(Icons.cancel, size: 18, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+
+            // Authentic WhatsApp Rounded Pill Input + Professional Green Send Button
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF1F2C34) : Colors.white,
+                      borderRadius: BorderRadius.circular(26.r),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.06),
+                          blurRadius: 4,
+                          offset: const Offset(0, 1),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        // Smiley / Template button
+                        IconButton(
+                          icon: Icon(
+                            Icons.emoji_emotions_outlined,
+                            color: Colors.grey[600],
+                            size: 24.sp,
+                          ),
+                          tooltip: 'Quick Templates',
+                          onPressed: _showTemplatePicker,
+                        ),
+
+                        // Message Text input
+                        Expanded(
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(vertical: 4.h),
+                            child: TextField(
+                              controller: _messageController,
+                              maxLines: 5,
+                              minLines: 1,
+                              textCapitalization: TextCapitalization.sentences,
+                              style: TextStyle(fontSize: 15.sp),
+                              decoration: InputDecoration(
+                                hintText: 'Message',
+                                hintStyle: TextStyle(color: Colors.grey[500], fontSize: 15.sp),
+                                border: InputBorder.none,
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 8.h),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // Paperclip Attachment icon (rotated 45 deg like WhatsApp)
+                        Transform.rotate(
+                          angle: -0.7,
+                          child: IconButton(
+                            icon: Icon(
+                              Icons.attach_file_rounded,
+                              color: Colors.grey[600],
+                              size: 24.sp,
+                            ),
+                            tooltip: 'Attach Media, Audio, or Document',
+                            onPressed: _showAttachmentMenu,
+                          ),
+                        ),
+
+                        // Camera Quick-Capture button
+                        IconButton(
+                          icon: Icon(
+                            Icons.camera_alt_rounded,
+                            color: Colors.grey[600],
+                            size: 22.sp,
+                          ),
+                          tooltip: 'Take Photo',
+                          onPressed: _pickCamera,
+                        ),
+                      ],
                     ),
                   ),
-                );
-              },
+                ),
+                SizedBox(width: 8.w),
+
+                // Professional WhatsApp Iconic Circular Send Button
+                Container(
+                  width: 48.w,
+                  height: 48.w,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF25D366),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF25D366).withValues(alpha: 0.4),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: _openWhatsApp,
+                      customBorder: const CircleBorder(),
+                      splashColor: Colors.white.withValues(alpha: 0.3),
+                      child: Center(
+                        child: Icon(
+                          Icons.send_rounded,
+                          color: Colors.white,
+                          size: 22.sp,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
-        );
-      },
+        ),
+      ),
     );
   }
 }
