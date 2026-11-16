@@ -86,6 +86,96 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> with WidgetsBin
     }
   }
 
+  Future<void> _showStoragePermissionDialog() async {
+    await showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.r)),
+        title: Row(
+          children: [
+            Container(
+              padding: EdgeInsets.all(8.w),
+              decoration: BoxDecoration(
+                color: const Color(0xFF25D366).withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.folder_special_rounded, color: Color(0xFF25D366)),
+            ),
+            SizedBox(width: 12.w),
+            const Expanded(
+              child: Text(
+                'Storage Access Needed',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'WhatsApp status photos aur videos ko automatically scan aur show karne ke liye Storage & Media Access enable karein.',
+              style: TextStyle(fontSize: 14.sp, height: 1.4),
+            ),
+            SizedBox(height: 14.h),
+            Container(
+              padding: EdgeInsets.all(12.w),
+              decoration: BoxDecoration(
+                color: const Color(0xFF25D366).withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12.r),
+                border: Border.all(color: const Color(0xFF25D366).withValues(alpha: 0.2)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.bolt_rounded, color: Color(0xFF25D366), size: 20),
+                  SizedBox(width: 8.w),
+                  const Expanded(
+                    child: Text(
+                      '1-Tap Setup: Settings me Chatflow ko Allow karein.',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Not Now', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF25D366),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
+              padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 10.h),
+            ),
+            icon: const Icon(Icons.security_update_good_rounded, size: 18),
+            label: const Text('Allow Access'),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await _channel.invokeMethod('requestManageStorage');
+              } catch (_) {
+                await [
+                  Permission.manageExternalStorage,
+                  Permission.storage,
+                  Permission.photos,
+                  Permission.videos,
+                ].request();
+              }
+              await _checkPermissions();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _clearCache() async {
     try {
       final tempDir = await getTemporaryDirectory();
@@ -202,14 +292,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> with WidgetsBin
             title: const Text('Storage & Media Access'),
             subtitle: Text(_storageGranted ? 'Granted (All Files Access Active)' : 'Disabled - Tap to enable All Files Access'),
             trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-            onTap: () async {
-              try {
-                await _channel.invokeMethod('requestManageStorage');
-              } catch (_) {
-                await [Permission.manageExternalStorage, Permission.storage, Permission.photos, Permission.videos].request();
-              }
-              await _checkPermissions();
-            },
+            onTap: _showStoragePermissionDialog,
           ),
           const Divider(),
 

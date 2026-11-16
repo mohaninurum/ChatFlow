@@ -11,7 +11,8 @@ import 'status_viewer_screen.dart';
 enum StatusSortOrder { newest, oldest, largest, smallest }
 
 class StatusSaverScreen extends ConsumerStatefulWidget {
-  const StatusSaverScreen({super.key});
+  final bool isTab;
+  const StatusSaverScreen({super.key, this.isTab = false});
 
   @override
   ConsumerState<StatusSaverScreen> createState() => StatusSaverScreenState();
@@ -80,7 +81,11 @@ class StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
       if (mounted) setState(() {});
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadStatuses();
+      if (widget.isTab) {
+        checkAndReload(promptIfDenied: false);
+      } else {
+        checkAndReload(promptIfDenied: true);
+      }
     });
   }
 
@@ -762,51 +767,36 @@ class StatusSaverScreenState extends ConsumerState<StatusSaverScreen>
   Widget _buildPermissionPrompt() {
     return Center(
       child: SingleChildScrollView(
-        child: Padding(
-          padding: EdgeInsets.all(28.w),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: EdgeInsets.all(20.w),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF25D366).withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
+        child: InkWell(
+          onTap: _showPermissionDialog,
+          borderRadius: BorderRadius.circular(24.r),
+          child: Padding(
+            padding: EdgeInsets.all(28.w),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: EdgeInsets.all(22.w),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF25D366).withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.folder_special_rounded, size: 54.sp, color: const Color(0xFF25D366)),
                 ),
-                child: Icon(Icons.folder_special_rounded, size: 54.sp, color: const Color(0xFF25D366)),
-              ),
-              SizedBox(height: 20.h),
-              Text(
-                'WhatsApp Status Access Required',
-                style: TextStyle(fontSize: 19.sp, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-              SizedBox(height: 10.h),
-              Text(
-                'WhatsApp ke photos aur videos status dekhne ke liye storage access enable karein. Ek tap me direct access mil jayega.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey[600], fontSize: 13.5.sp, height: 1.4),
-              ),
-              SizedBox(height: 24.h),
-              ElevatedButton.icon(
-                onPressed: _showPermissionDialog,
-                icon: const Icon(Icons.security_update_good_rounded),
-                label: const Text('Allow Storage & Media Access'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF25D366),
-                  foregroundColor: Colors.white,
-                  padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 13.h),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
-                  elevation: 2,
+                SizedBox(height: 20.h),
+                Text(
+                  'WhatsApp Status Access Required',
+                  style: TextStyle(fontSize: 19.sp, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
                 ),
-              ),
-              SizedBox(height: 12.h),
-              TextButton.icon(
-                onPressed: () => checkAndReload(promptIfDenied: false),
-                icon: const Icon(Icons.refresh),
-                label: const Text('Check Again'),
-              ),
-            ],
+                SizedBox(height: 10.h),
+                Text(
+                  'WhatsApp ke photos aur videos status dekhne ke liye storage access enable karein.\nTap karein setup dialog kholne ke liye.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey[600], fontSize: 13.5.sp, height: 1.4),
+                ),
+              ],
+            ),
           ),
         ),
       ),

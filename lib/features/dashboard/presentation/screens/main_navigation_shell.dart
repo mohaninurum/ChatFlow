@@ -26,7 +26,7 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell> {
         index: _currentIndex,
         children: [
           const HomeScreen(),
-          StatusSaverScreen(key: _statusScreenKey),
+          StatusSaverScreen(key: _statusScreenKey, isTab: true),
           const ToolsScreen(),
           const SettingsScreen(),
         ],
@@ -37,7 +37,7 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell> {
           final wasDifferent = _currentIndex != index;
           setState(() => _currentIndex = index);
           if (index == 1 && wasDifferent) {
-            _statusScreenKey.currentState?.checkAndReload(promptIfDenied: false);
+            _statusScreenKey.currentState?.checkAndReload(promptIfDenied: true);
           }
         },
         backgroundColor: isDark ? const Color(0xFF1E2830) : Colors.white,
