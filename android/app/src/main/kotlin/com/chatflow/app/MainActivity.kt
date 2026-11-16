@@ -17,7 +17,9 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.chatflow.app/channel"
     private var pendingSafResult: MethodChannel.Result? = null
+    private var pendingFilePickResult: MethodChannel.Result? = null
     private val REQUEST_CODE_SAF = 9921
+    private val REQUEST_CODE_PICK_FILE = 9922
 
     private val directWhatsappPaths = listOf(
         // WhatsApp Standard
@@ -52,12 +54,6 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
-
-        WhatsAppNotificationListenerService.onNewMessageCallback = { msgMap ->
-            runOnUiThread {
-                channel.invokeMethod("onNotificationReceived", msgMap)
-            }
-        }
 
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -315,19 +311,7 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "isNotificationAccessGranted" -> {
-                    try {
-                        val enabledListeners = android.provider.Settings.Secure.getString(
-                            contentResolver,
-                            "enabled_notification_listeners"
-                        )
-                        val isGranted = enabledListeners != null && (
-                            enabledListeners.contains(packageName) ||
-                            enabledListeners.contains("com.chatflow.app")
-                        )
-                        result.success(isGranted)
-                    } catch (e: Exception) {
-                        result.success(false)
-                    }
+                    result.success(false)
                 }
                 "openNotificationSettings" -> {
                     try {
@@ -340,12 +324,23 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "getArchivedNotifications" -> {
-                    val notifications = WhatsAppNotificationListenerService.getArchivedNotifications(this)
-                    result.success(notifications)
+                    result.success(listOf<Map<String, Any>>())
                 }
                 "clearArchivedNotifications" -> {
-                    val cleared = WhatsAppNotificationListenerService.clearArchivedNotifications(this)
-                    result.success(cleared)
+                    result.success(true)
+                }
+                "pickChatFile" -> {
+                    try {
+                        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/plain", "text/*"))
+                        }
+                        pendingFilePickResult = result
+                        startActivityForResult(intent, REQUEST_CODE_PICK_FILE)
+                    } catch (e: Exception) {
+                        result.error("PICK_ERROR", e.message, null)
+                    }
                 }
                 "shareText" -> {
                     val text = call.argument<String>("text")
@@ -513,6 +508,21 @@ class MainActivity : FlutterActivity() {
                 pendingSafResult?.success(false)
             }
             pendingSafResult = null
+        } else if (requestCode == REQUEST_CODE_PICK_FILE) {
+            if (resultCode == Activity.RESULT_OK && data?.data != null) {
+                val uri = data.data!!
+                try {
+                    contentResolver.openInputStream(uri)?.use { stream ->
+                        val text = stream.bufferedReader().use { it.readText() }
+                        pendingFilePickResult?.success(text)
+                    } ?: pendingFilePickResult?.error("READ_ERROR", "Could not open file", null)
+                } catch (e: Exception) {
+                    pendingFilePickResult?.error("READ_ERROR", e.message, null)
+                }
+            } else {
+                pendingFilePickResult?.success(null)
+            }
+            pendingFilePickResult = null
         }
     }
 }

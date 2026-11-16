@@ -1,8 +1,6 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../features/dashboard/presentation/screens/home_screen.dart';
 import '../../features/dashboard/presentation/screens/main_navigation_shell.dart';
 import '../../features/dashboard/presentation/screens/tools_screen.dart';
 import '../../features/direct_chat/presentation/screens/direct_chat_screen.dart';
