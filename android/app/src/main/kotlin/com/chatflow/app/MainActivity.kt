@@ -55,12 +55,6 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
 
-        WhatsAppNotificationListenerService.onNewMessageCallback = { msgMap ->
-            runOnUiThread {
-                channel.invokeMethod("onNotificationReceived", msgMap)
-            }
-        }
-
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "shareFile" -> {
@@ -317,31 +311,10 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "isNotificationAccessGranted" -> {
-                    try {
-                        val enabledListeners = android.provider.Settings.Secure.getString(
-                            contentResolver,
-                            "enabled_notification_listeners"
-                        )
-                        val isGranted = enabledListeners != null && (
-                            enabledListeners.contains(packageName) ||
-                            enabledListeners.contains("${packageName}/com.chatflow.app.WhatsAppNotificationListenerService") ||
-                            enabledListeners.contains("com.chatflow.app")
-                        )
-                        result.success(isGranted)
-                    } catch (e: Exception) {
-                        result.success(false)
-                    }
+                    result.success(false)
                 }
                 "openNotificationSettings" -> {
-                    try {
-                        val intent = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS").apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        startActivity(intent)
-                        result.success(true)
-                    } catch (e: Exception) {
-                        result.error("SETTINGS_ERROR", e.message, null)
-                    }
+                    result.success(true)
                 }
                 "openAppDetailsSettings" -> {
                     try {
@@ -356,12 +329,10 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "getArchivedNotifications" -> {
-                    val notifications = WhatsAppNotificationListenerService.getArchivedNotifications(this)
-                    result.success(notifications)
+                    result.success(listOf<Map<String, Any>>())
                 }
                 "clearArchivedNotifications" -> {
-                    val cleared = WhatsAppNotificationListenerService.clearArchivedNotifications(this)
-                    result.success(cleared)
+                    result.success(true)
                 }
                 "pickChatFile" -> {
                     try {

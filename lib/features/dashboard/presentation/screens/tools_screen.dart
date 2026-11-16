@@ -8,9 +8,6 @@ class ToolsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Chatflow Tools'),
@@ -22,10 +19,18 @@ class ToolsScreen extends ConsumerWidget {
           _buildToolTile(
             context: context,
             title: 'Direct Chat',
-            subtitle: 'Message any number on WhatsApp without saving',
+            subtitle: 'Message any number on WhatsApp without saving contact',
             icon: Icons.chat_bubble_outline,
             color: const Color(0xFF25D366),
             route: 'directChat',
+          ),
+          _buildToolTile(
+            context: context,
+            title: 'Status Saver',
+            subtitle: 'View, save and share photo & video statuses',
+            icon: Icons.download_rounded,
+            color: Colors.blue,
+            route: 'statusSaver',
           ),
           _buildToolTile(
             context: context,
@@ -35,79 +40,20 @@ class ToolsScreen extends ConsumerWidget {
             color: Colors.blueAccent,
             route: 'linkGenerator',
           ),
-          _buildToolTile(
-            context: context,
-            title: 'Message Reminders',
-            subtitle: 'Schedule upcoming WhatsApp messages with 1-tap send',
-            icon: Icons.alarm_on_outlined,
-            color: Colors.deepOrange,
-            route: 'reminders',
-          ),
-          _buildToolTile(
-            context: context,
-            title: 'Quick Reply Templates',
-            subtitle: 'Ready-to-use business, driving, & support templates',
-            icon: Icons.quickreply_outlined,
-            color: Colors.purple,
-            route: 'chatUtilities',
-          ),
           SizedBox(height: 16.h),
 
-          _buildCategoryHeader(context, 'PRIVACY & SECURITY'),
-          _buildToolTile(
-            context: context,
-            title: 'Recover Deleted Messages',
-            subtitle: 'Archive incoming notifications & view deleted texts',
-            icon: Icons.mark_chat_unread_outlined,
-            color: Colors.redAccent,
-            route: 'deletedMessages',
-          ),
-          _buildToolTile(
-            context: context,
-            title: 'Private Vault',
-            subtitle: 'Encrypted storage with 4-digit PIN for private notes',
-            icon: Icons.shield_outlined,
-            color: Colors.teal,
-            route: 'privateVault',
-          ),
-          _buildToolTile(
-            context: context,
-            title: 'Clipboard Manager',
-            subtitle: 'Save frequent snippets and addresses safely',
-            icon: Icons.assignment_outlined,
-            color: Colors.indigo,
-            route: 'clipboardManager',
-          ),
-          SizedBox(height: 16.h),
-
-          _buildCategoryHeader(context, 'AI & PRODUCTIVITY SUITE'),
-          _buildToolTile(
-            context: context,
-            title: 'AI Reply Assistant',
-            subtitle: 'Generate professional, friendly, or business replies',
-            icon: Icons.auto_awesome,
-            color: Colors.amber[800]!,
-            route: 'aiAssistant',
-          ),
-          _buildToolTile(
-            context: context,
-            title: 'AI Message Translator',
-            subtitle: 'Translate Hindi <-> English in formal & casual styles',
-            icon: Icons.translate,
-            color: Colors.cyan,
-            route: 'aiTranslator',
-          ),
+          _buildCategoryHeader(context, 'TEXT & MEDIA UTILITIES'),
           _buildToolTile(
             context: context,
             title: 'Image to Text (OCR)',
             subtitle: 'Scan camera or gallery images to extract text',
             icon: Icons.document_scanner_outlined,
-            color: Colors.green[700]!,
+            color: Colors.cyan[700]!,
             route: 'ocr',
           ),
           _buildToolTile(
             context: context,
-            title: 'Text Formatter & Unicode Fonts',
+            title: 'Text Formatter & Fonts',
             subtitle: 'Bold, italics, stylish cursive & bubble fonts',
             icon: Icons.text_format,
             color: Colors.pinkAccent,
@@ -144,24 +90,28 @@ class ToolsScreen extends ConsumerWidget {
   }) {
     return Card(
       elevation: 1,
-      margin: EdgeInsets.only(bottom: 8.h),
+      margin: EdgeInsets.only(bottom: 10.h),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
       child: ListTile(
         contentPadding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 4.h),
         leading: Container(
           padding: EdgeInsets.all(10.w),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.12),
+            color: color.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(12.r),
           ),
-          child: Icon(icon, color: color, size: 24.sp),
+          child: Icon(icon, color: color, size: 22.sp),
         ),
-        title: Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14.sp)),
-        subtitle: Text(
-          subtitle,
-          style: TextStyle(fontSize: 11.5.sp, color: Colors.grey[600]),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
+        title: Text(
+          title,
+          style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.bold),
+        ),
+        subtitle: Padding(
+          padding: EdgeInsets.only(top: 2.h),
+          child: Text(
+            subtitle,
+            style: TextStyle(fontSize: 11.5.sp, color: Colors.grey[600]),
+          ),
         ),
         trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
         onTap: () => context.pushNamed(route),

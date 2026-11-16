@@ -38,7 +38,7 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell> {
           setState(() => _currentIndex = index);
         },
         backgroundColor: isDark ? const Color(0xFF1E2830) : Colors.white,
-        indicatorColor: const Color(0xFF25D366).withOpacity(0.18),
+        indicatorColor: const Color(0xFF25D366).withValues(alpha: 0.18),
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.home_outlined),

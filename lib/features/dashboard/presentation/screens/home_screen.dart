@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:go_router/go_router.dart';
-import 'package:hive_flutter/hive_flutter.dart';
-import '../../../../core/storage/hive_storage_service.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -92,18 +90,6 @@ class HomeScreen extends ConsumerWidget {
                 ),
                 SizedBox(height: 12.h),
                 _buildFeaturesGrid(context),
-                SizedBox(height: 24.h),
-
-                // Recent Activities Header & List
-                Text(
-                  'Recent Activity',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16.sp,
-                  ),
-                ),
-                SizedBox(height: 10.h),
-                _buildRecentActivitySection(),
                 SizedBox(height: 32.h),
               ]),
             ),
@@ -192,7 +178,7 @@ class HomeScreen extends ConsumerWidget {
     final actions = [
       {'title': 'Direct Chat', 'icon': Icons.send_rounded, 'color': const Color(0xFF25D366), 'route': 'directChat'},
       {'title': 'Status Saver', 'icon': Icons.download_rounded, 'color': Colors.blue, 'route': 'statusSaver'},
-      {'title': 'Deleted Msg', 'icon': Icons.mark_chat_unread_outlined, 'color': Colors.redAccent, 'route': 'deletedMessages'},
+      {'title': 'Text Format', 'icon': Icons.text_format_rounded, 'color': Colors.pinkAccent, 'route': 'textFormatter'},
       {'title': 'Link Maker', 'icon': Icons.qr_code, 'color': Colors.amber[800]!, 'route': 'linkGenerator'},
     ];
 
@@ -232,11 +218,18 @@ class HomeScreen extends ConsumerWidget {
   Widget _buildFeaturesGrid(BuildContext context) {
     final features = [
       {
-        'title': 'Message Reminders',
-        'subtitle': 'Schedule upcoming chats',
-        'icon': Icons.alarm,
-        'route': 'reminders',
-        'color': Colors.deepOrange,
+        'title': 'Direct Chat',
+        'subtitle': 'Message without saving number',
+        'icon': Icons.chat_bubble_outline,
+        'route': 'directChat',
+        'color': const Color(0xFF25D366),
+      },
+      {
+        'title': 'Status Saver',
+        'subtitle': 'Save photo & video status',
+        'icon': Icons.download_rounded,
+        'route': 'statusSaver',
+        'color': Colors.blue,
       },
       {
         'title': 'Image to Text',
@@ -247,17 +240,10 @@ class HomeScreen extends ConsumerWidget {
       },
       {
         'title': 'Text Formatter',
-        'subtitle': 'Bold, italics, & bubble fonts',
+        'subtitle': 'Bold, italics, & stylish fonts',
         'icon': Icons.text_format,
         'route': 'textFormatter',
         'color': Colors.pinkAccent,
-      },
-      {
-        'title': 'Link Generator',
-        'subtitle': 'Create wa.me links & QR codes',
-        'icon': Icons.qr_code_2_rounded,
-        'route': 'linkGenerator',
-        'color': Colors.blueAccent,
       },
     ];
 
@@ -311,54 +297,6 @@ class HomeScreen extends ConsumerWidget {
               ),
             ),
           ),
-        );
-      },
-    );
-  }
-
-  Widget _buildRecentActivitySection() {
-    return ValueListenableBuilder(
-      valueListenable: HiveStorageService.history.listenable(),
-      builder: (context, Box box, _) {
-        if (box.isEmpty) {
-          return Container(
-            padding: EdgeInsets.all(20.w),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: Colors.grey.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(16.r),
-            ),
-            child: const Text('No recent activity recorded yet.', style: TextStyle(color: Colors.grey)),
-          );
-        }
-
-        final recent = box.values.toList().reversed.take(4).toList();
-
-        return ListView.separated(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: recent.length,
-          separatorBuilder: (context, index) => SizedBox(height: 8.h),
-          itemBuilder: (context, index) {
-            final item = recent[index] as Map;
-            final phone = item['phone']?.toString() ?? 'Direct Chat';
-            final msg = item['message']?.toString() ?? '';
-            final type = item['type']?.toString() ?? 'Chat';
-
-            return Card(
-              elevation: 0.8,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14.r)),
-              child: ListTile(
-                dense: true,
-                leading: CircleAvatar(
-                  backgroundColor: const Color(0xFF25D366).withValues(alpha: 0.12),
-                  child: const Icon(Icons.history, color: Color(0xFF25D366), size: 18),
-                ),
-                title: Text('$type: $phone', style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: msg.isNotEmpty ? Text(msg, maxLines: 1, overflow: TextOverflow.ellipsis) : null,
-              ),
-            );
-          },
         );
       },
     );
